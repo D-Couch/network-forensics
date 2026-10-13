@@ -1,6 +1,6 @@
 //! Deterministic probe-target incident grouping over stored events.
 
-use crate::event::{EventKind, ProbeFailureCategory, ProbeOutcome, SCHEMA_VERSION};
+use crate::event::{supports_schema_version, EventKind, ProbeFailureCategory, ProbeOutcome};
 use crate::probes::ProbeTarget;
 use crate::storage::StoredEvent;
 use chrono::{DateTime, Utc};
@@ -168,7 +168,7 @@ pub fn analyze_events(
         }
         previous_sequence = Some(stored.sequence);
 
-        if stored.event.schema_version != SCHEMA_VERSION {
+        if !supports_schema_version(stored.event.schema_version) {
             return Err(IncidentError::InvalidEventSchema(
                 stored.event.schema_version,
             ));
@@ -323,7 +323,7 @@ mod tests {
         StoredEvent {
             sequence,
             event: Event {
-                schema_version: SCHEMA_VERSION,
+                schema_version: crate::event::SCHEMA_VERSION,
                 id: id.to_owned(),
                 recorded_at_utc: at,
                 source: "probe".to_owned(),
@@ -633,7 +633,7 @@ mod tests {
             "192.0.2.1:443",
             ProbeOutcome::Timeout,
         );
-        future.event.schema_version = SCHEMA_VERSION + 1;
+        future.event.schema_version = crate::event::SCHEMA_VERSION + 1;
         assert!(matches!(
             analyze_events(&[future], IncidentConfig::default()),
             Err(IncidentError::InvalidEventSchema(_))

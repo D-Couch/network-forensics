@@ -1,7 +1,7 @@
 //! Bounded deterministic replay of versioned synthetic event fixtures.
 
 use crate::analysis::{analyze_incidents, AnalysisConfig, AnalysisError, Finding};
-use crate::event::{Event, SCHEMA_VERSION};
+use crate::event::{supports_schema_version, Event};
 use crate::incidents::{analyze_events, Incident, IncidentConfig, IncidentError};
 use crate::storage::StoredEvent;
 use serde::Deserialize;
@@ -111,7 +111,7 @@ pub fn replay_json(json: &str) -> Result<ReplayResult, ReplayError> {
         .events
         .into_iter()
         .map(|item| {
-            if item.event.schema_version != SCHEMA_VERSION {
+            if !supports_schema_version(item.event.schema_version) {
                 return Err(ReplayError::Incident(IncidentError::InvalidEventSchema(
                     item.event.schema_version,
                 )));
@@ -171,6 +171,9 @@ mod tests {
                     "multiple_external_targets_failed"
                 }
                 FindingClassification::EndpointSpecificEvidence => "endpoint_specific_evidence",
+                FindingClassification::DnsQueryFailureWithIndependentTcpSuccess => {
+                    "dns_query_failure_with_independent_tcp_success"
+                }
                 FindingClassification::Undetermined => "undetermined",
             })
             .map(str::to_owned)
@@ -235,7 +238,7 @@ mod tests {
             Err(ReplayError::DuplicateEventId)
         ));
         assert!(matches!(
-            replay_json(&valid.replace("\"schema_version\": 1", "\"schema_version\": 2")),
+            replay_json(&valid.replace("\"schema_version\": 1", "\"schema_version\": 3")),
             Err(ReplayError::Json(_))
         ));
     }

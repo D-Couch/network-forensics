@@ -26,7 +26,7 @@ events, without persisting derived incident records.
 ## M3 — Explainable diagnosis and replay
 
 - [x] **Task 0008 — Conservative analysis core:** deterministic evidence-citing Rust API over current probe and carrier observations; unsupported cases remain undetermined.
-- Add DNS observations and carefully scoped rules for local link, gateway/LAN, DNS, upstream path, endpoint-only, and undetermined cases.
+- [x] **Task 0010 — Explicit DNS observation:** one opt-in system-configured DNS query per monitoring round, typed versioned events, and cautious DNS-query failure analysis.
 - [x] **Task 0009 — Versioned fixture replay:** strict, bounded offline fixtures run through the incident and analysis APIs.
 - Support `analyze --latest`, human-readable and sanitized JSON `report --latest`.
 - Test false-positive avoidance, uncertainty, source availability, timestamp ordering, and ambiguous signals.

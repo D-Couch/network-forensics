@@ -26,6 +26,11 @@ The monitor's round tests use fake transport and clock implementations and
 validate the newline-delimited event output. Signal and CLI target validation
 should be tested without invoking a real network connection.
 
+DNS tests use an injected transport and clock; routine tests never query a
+resolver. Cover FQDN validation, opt-in CLI parsing, DNS result serialization
+without answer addresses, configured DNS event ordering and timeout, schema-v1
+history compatibility, and cautious DNS analysis with independent TCP success.
+
 The event store tests use in-memory SQLite or temporary files. They cover
 schema migration and rejection, durable reopen and sequence paging, atomic
 rollback, age/count retention, path validation, Unix permissions, and symlink

@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod dns;
 pub mod event;
 pub mod incidents;
 pub mod interfaces;
@@ -21,7 +22,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, and local incident history are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All probe targets must be numeric IP addresses; no DNS lookup is performed. Incident history is read-only and uses local stored events.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, and local incident history are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. Incident history is read-only and uses local stored events.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -227,6 +228,7 @@ fn parse_monitor_args(args: &[String]) -> Result<MonitorConfig, String> {
     let mut retention_days = DEFAULT_RETENTION_DAYS;
     let mut max_events = DEFAULT_MAX_EVENTS;
     let mut targets = Vec::new();
+    let mut dns_name = None;
     let mut index = 0;
     while index < args.len() {
         let option = args[index].as_str();
@@ -256,6 +258,12 @@ fn parse_monitor_args(args: &[String]) -> Result<MonitorConfig, String> {
             }
             "--gateway" => targets.push(parse_probe_target("gateway", value)?),
             "--external" => targets.push(parse_probe_target("external", value)?),
+            "--dns-name" => {
+                if dns_name.is_some() {
+                    return Err("only one --dns-name may be configured".to_owned());
+                }
+                dns_name = Some(crate::dns::DnsName::parse(value).map_err(str::to_owned)?);
+            }
             _ => return Err(format!("unknown option {option}")),
         }
         index += 2;
@@ -263,6 +271,7 @@ fn parse_monitor_args(args: &[String]) -> Result<MonitorConfig, String> {
     let retention =
         RetentionPolicy::new(retention_days, max_events).map_err(|error| error.to_string())?;
     MonitorConfig::with_retention(interval_millis, timeout_millis, targets, retention)
+        .map(|config| config.with_dns_name(dns_name))
         .map_err(str::to_owned)
 }
 
@@ -425,6 +434,39 @@ mod tests {
             "192.0.2.1:443".to_owned(),
         ];
         assert!(parse_monitor_args(&repeated).is_err());
+    }
+
+    #[test]
+    fn monitor_parser_makes_dns_explicit_and_validates_single_fqdn() {
+        let base =
+            ["--external", "192.0.2.1:443", "--external", "192.0.2.2:443"].map(str::to_owned);
+        let without_dns = parse_monitor_args(&base).unwrap();
+        assert!(without_dns.dns_name.is_none());
+        let with_dns = [
+            base.to_vec(),
+            ["--dns-name", "example.com."].map(str::to_owned).to_vec(),
+        ]
+        .concat();
+        assert_eq!(
+            parse_monitor_args(&with_dns)
+                .unwrap()
+                .dns_name
+                .unwrap()
+                .as_str(),
+            "example.com."
+        );
+        let relative = [
+            base.to_vec(),
+            ["--dns-name", "example.com"].map(str::to_owned).to_vec(),
+        ]
+        .concat();
+        assert!(parse_monitor_args(&relative).is_err());
+        let duplicate = [
+            with_dns,
+            ["--dns-name", "other.example."].map(str::to_owned).to_vec(),
+        ]
+        .concat();
+        assert!(parse_monitor_args(&duplicate).is_err());
     }
 
     #[test]

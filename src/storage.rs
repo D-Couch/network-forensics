@@ -435,6 +435,7 @@ fn event_kind_name(kind: &EventKind) -> &'static str {
         EventKind::LinkStateChanged { .. } => "link_state_changed",
         EventKind::ProbeResult { .. } => "probe_result",
         EventKind::InterfaceSnapshot { .. } => "interface_snapshot",
+        EventKind::DnsResult { .. } => "dns_result",
     }
 }
 
@@ -665,10 +666,11 @@ mod tests {
 
         let mut store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
         let mut unsupported = event("future", "2026-10-12T23:59:00Z");
-        unsupported.schema_version = 2;
+        let future_schema = SCHEMA_VERSION + 1;
+        unsupported.schema_version = future_schema;
         assert!(matches!(
             store.store_events_at(&[unsupported], "2026-10-13T00:00:00Z".parse().unwrap()),
-            Err(StorageError::InvalidEventSchema(2))
+            Err(StorageError::InvalidEventSchema(version)) if version == future_schema
         ));
         assert_eq!(store.event_count().unwrap(), 0);
     }

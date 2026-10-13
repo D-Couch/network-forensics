@@ -1,5 +1,6 @@
 //! Foreground observation rounds and interruptible interval waiting.
 
+use crate::dns::{DnsName, DnsRunner, DnsTransport};
 use crate::event::{Event, EventKind, ProbeRole};
 use crate::interfaces::{self, Discovery};
 use crate::probes::{
@@ -25,6 +26,7 @@ pub struct MonitorConfig {
     pub probe: ProbeConfig,
     pub targets: Vec<ProbeTarget>,
     pub retention: RetentionPolicy,
+    pub dns_name: Option<DnsName>,
 }
 
 impl MonitorConfig {
@@ -89,7 +91,13 @@ impl MonitorConfig {
             probe: ProbeConfig::from_millis(timeout_millis)?,
             targets,
             retention,
+            dns_name: None,
         })
+    }
+
+    pub fn with_dns_name(mut self, dns_name: Option<DnsName>) -> Self {
+        self.dns_name = dns_name;
+        self
     }
 }
 
@@ -138,6 +146,31 @@ where
     events
 }
 
+pub fn collect_cycle_with_dns<T, C, D, E, F>(
+    discovery: &Discovery,
+    config: &MonitorConfig,
+    runner: &mut ProbeRunner<T, C>,
+    dns_runner: &mut DnsRunner<D, E>,
+    stop: &AtomicBool,
+    cycle_time: DateTime<Utc>,
+    mut next_id: F,
+) -> Vec<Event>
+where
+    T: ProbeTransport,
+    C: ProbeClock,
+    D: DnsTransport,
+    E: ProbeClock,
+    F: FnMut() -> String,
+{
+    let mut events = collect_cycle(discovery, config, runner, stop, cycle_time, &mut next_id);
+    if !stop.load(Ordering::Acquire) {
+        if let Some(name) = &config.dns_name {
+            events.push(dns_runner.run(next_id(), name, config.probe.timeout()));
+        }
+    }
+    events
+}
+
 fn write_event<W: Write>(writer: &mut W, event: &Event) -> io::Result<()> {
     let serialized = serde_json::to_string(event).map_err(io::Error::other)?;
     writeln!(writer, "{serialized}")
@@ -167,6 +200,13 @@ pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
     let stdout = io::stdout();
     let mut writer = BufWriter::new(stdout.lock());
     let mut runner = ProbeRunner::new(SystemTransport, SystemClock::new());
+    let mut dns_runner = match &config.dns_name {
+        Some(_) => Some(DnsRunner::new(
+            crate::dns::SystemDnsTransport::new(config.probe.timeout())?,
+            SystemClock::new(),
+        )),
+        None => None,
+    };
 
     while !stop.load(Ordering::Acquire) {
         let discovery = match interfaces::discover() {
@@ -180,14 +220,26 @@ pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
             }
         };
         let cycle_time = DateTime::<Utc>::from(SystemTime::now());
-        let events = collect_cycle(
-            &discovery,
-            &config,
-            &mut runner,
-            &stop,
-            cycle_time,
-            crate::next_event_id,
-        );
+        let events = if let Some(dns_runner) = &mut dns_runner {
+            collect_cycle_with_dns(
+                &discovery,
+                &config,
+                &mut runner,
+                dns_runner,
+                &stop,
+                cycle_time,
+                crate::next_event_id,
+            )
+        } else {
+            collect_cycle(
+                &discovery,
+                &config,
+                &mut runner,
+                &stop,
+                cycle_time,
+                crate::next_event_id,
+            )
+        };
         persist_then_write(&mut store, &events, &mut writer)?;
         writer.flush()?;
         if !stop.load(Ordering::Acquire) {
@@ -211,6 +263,7 @@ fn wait_interval(interval: Duration, stop: &AtomicBool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::{DnsLookupError, DnsName, DnsTransport};
     use crate::event::{EventKind, ProbeMethod, ProbeOutcome};
     use crate::interfaces::{InterfaceState, OperationalState};
     use std::cell::{Cell, RefCell};
@@ -244,6 +297,18 @@ mod tests {
 
         fn monotonic_now(&self) -> Duration {
             self.monotonic.borrow_mut().pop_front().unwrap()
+        }
+    }
+
+    struct FakeDnsTransport(Rc<RefCell<Vec<Duration>>>);
+    impl DnsTransport for FakeDnsTransport {
+        fn lookup(
+            &mut self,
+            _name: &DnsName,
+            timeout: Duration,
+        ) -> Result<Vec<std::net::IpAddr>, DnsLookupError> {
+            self.0.borrow_mut().push(timeout);
+            Ok(vec!["192.0.2.53".parse().unwrap()])
         }
     }
 
@@ -360,6 +425,57 @@ mod tests {
             }
         ));
         assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn configured_dns_event_follows_tcp_events_and_uses_same_timeout() {
+        let mut runner = ProbeRunner::new(
+            FakeTransport {
+                calls: Rc::new(Cell::new(0)),
+            },
+            FakeClock {
+                monotonic: RefCell::new(VecDeque::from([
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                ])),
+            },
+        );
+        let dns_timeouts = Rc::new(RefCell::new(Vec::new()));
+        let mut dns_runner = DnsRunner::new(
+            FakeDnsTransport(Rc::clone(&dns_timeouts)),
+            FakeClock {
+                monotonic: RefCell::new(VecDeque::from([Duration::ZERO, Duration::from_millis(7)])),
+            },
+        );
+        let config = MonitorConfig::new(
+            DEFAULT_INTERVAL_MILLIS,
+            250,
+            vec![target("192.0.2.1"), target("192.0.2.2")],
+        )
+        .unwrap()
+        .with_dns_name(Some(DnsName::parse("example.com.").unwrap()));
+        let events = collect_cycle_with_dns(
+            &discovery(),
+            &config,
+            &mut runner,
+            &mut dns_runner,
+            &AtomicBool::new(false),
+            "2026-10-13T00:00:00Z".parse().unwrap(),
+            || "id".to_owned(),
+        );
+        assert!(matches!(
+            events.last().unwrap().kind,
+            EventKind::DnsResult { elapsed_ms: 7, .. }
+        ));
+        assert_eq!(
+            dns_timeouts.borrow().as_slice(),
+            &[Duration::from_millis(250)]
+        );
+        assert!(events[..events.len() - 1]
+            .iter()
+            .all(|event| !matches!(event.kind, EventKind::DnsResult { .. })));
     }
 
     #[test]

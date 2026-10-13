@@ -2,7 +2,12 @@ use chrono::{DateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::net::SocketAddr;
 
-pub const SCHEMA_VERSION: u16 = 1;
+pub const SCHEMA_VERSION: u16 = 2;
+pub const MIN_SUPPORTED_SCHEMA_VERSION: u16 = 1;
+
+pub const fn supports_schema_version(version: u16) -> bool {
+    version >= MIN_SUPPORTED_SCHEMA_VERSION && version <= SCHEMA_VERSION
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -27,6 +32,35 @@ pub enum EventKind {
         speed_mbps: Option<u64>,
         is_default_route: Option<bool>,
     },
+    DnsResult {
+        query_name: String,
+        started_at_utc: DateTime<Utc>,
+        elapsed_ms: u64,
+        outcome: DnsOutcome,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "detail", rename_all = "snake_case")]
+pub enum DnsOutcome {
+    Success { answer_count: u16 },
+    Timeout,
+    Failure(DnsFailureCategory),
+    UnsupportedOrBlocked(DnsLimitationCategory),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsFailureCategory {
+    NameNotFound,
+    NoAddressRecords,
+    ResolverFailure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsLimitationCategory {
+    ResolverUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -94,10 +128,10 @@ impl<'de> Deserialize<'de> for Event {
         D: Deserializer<'de>,
     {
         let wire = EventWire::deserialize(deserializer)?;
-        if wire.schema_version != SCHEMA_VERSION {
+        if !supports_schema_version(wire.schema_version) {
             return Err(de::Error::custom(format!(
-                "unsupported schema_version {}; expected {}",
-                wire.schema_version, SCHEMA_VERSION
+                "unsupported schema_version {}; supported versions are {} through {}",
+                wire.schema_version, MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION
             )));
         }
         Ok(Self {
@@ -141,7 +175,7 @@ mod tests {
     fn round_trips_stable_json_shape() {
         let original = event(Some(false));
         let json = original.to_json().unwrap();
-        assert!(json.contains("\"schema_version\": 1"));
+        assert!(json.contains("\"schema_version\": 2"));
         assert!(json.contains("\"type\": \"link_state_changed\""));
         assert_eq!(Event::from_json(&json).unwrap(), original);
     }
@@ -151,11 +185,21 @@ mod tests {
         let json = event(Some(true))
             .to_json()
             .unwrap()
-            .replace("\"schema_version\": 1", "\"schema_version\": 2");
+            .replace("\"schema_version\": 2", "\"schema_version\": 3");
         assert!(Event::from_json(&json)
             .unwrap_err()
             .to_string()
-            .contains("unsupported schema_version 2"));
+            .to_string()
+            .contains("unsupported schema_version 3"));
+    }
+
+    #[test]
+    fn continues_to_read_schema_v1_events() {
+        let json = event(Some(true))
+            .to_json()
+            .unwrap()
+            .replace("\"schema_version\": 2", "\"schema_version\": 1");
+        assert_eq!(Event::from_json(&json).unwrap().schema_version, 1);
     }
 
     #[test]
@@ -199,6 +243,27 @@ mod tests {
         assert!(json.contains("\"type\": \"probe_result\""));
         assert!(json.contains("\"role\": \"external\""));
         assert!(json.contains("\"target\": \"203.0.113.8:443\""));
+        assert_eq!(Event::from_json(&json).unwrap(), event);
+    }
+
+    #[test]
+    fn dns_event_round_trips_typed_privacy_minimized_result() {
+        let event = Event {
+            schema_version: SCHEMA_VERSION,
+            id: "dns-1".into(),
+            recorded_at_utc: "2026-01-01T00:00:00Z".parse().unwrap(),
+            source: "dns".into(),
+            kind: EventKind::DnsResult {
+                query_name: "example.com.".into(),
+                started_at_utc: "2026-01-01T00:00:00Z".parse().unwrap(),
+                elapsed_ms: 12,
+                outcome: DnsOutcome::Success { answer_count: 2 },
+            },
+        };
+        let json = event.to_json().unwrap();
+        assert!(json.contains("example.com."));
+        assert!(json.contains("answer_count"));
+        assert!(!json.contains("192.0.2.1"));
         assert_eq!(Event::from_json(&json).unwrap(), event);
     }
 

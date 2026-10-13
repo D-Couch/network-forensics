@@ -38,7 +38,7 @@ The target interface is `netforensics --help`, `--version`, `status`, `monitor`,
 
 ### FR-02 Probe observation
 
-Support a local default-gateway reachability probe and at least two independently configured external reachability targets. For the MVP use an unprivileged probe method (e.g., TCP connect) where appropriate. Distinguish `success`, `failure`, `timeout`, and `unsupported/blocked` rather than equating ICMP failure with Internet outage. DNS lookups must be a separate signal. Include method, target role, start time, elapsed time, result, and sanitized failure category.
+Support a local default-gateway reachability probe and at least two independently configured external reachability targets. For the MVP use an unprivileged probe method (e.g., TCP connect) where appropriate. Distinguish `success`, `failure`, `timeout`, and `unsupported/blocked` rather than equating ICMP failure with Internet outage. DNS lookups must be a separate signal. Task 0010 implements one explicit opt-in `--dns-name` fully qualified query using system nameserver configuration; no lookup occurs without it. Include method, target role, start time, elapsed time, result, and sanitized failure category.
 
 ### FR-03 Link/interface observation
 
@@ -54,7 +54,7 @@ The Task 0006 pure Rust lifecycle API groups stored probe events by exact role a
 
 ### FR-06 Diagnosis
 
-Task 0008 provides a pure deterministic analysis API over currently stored TCP probe and carrier observations. It can return local-link-related evidence, configured gateway-role target failure, multiple external targets failed, endpoint-specific evidence supported by another successful external target, or undetermined. Findings cite event IDs and include explanatory text, limitations, and a follow-up check. The 60-second correlation window is skipped when timestamps move backwards. DNS-specific findings remain undetermined until DNS observations exist. These labels describe evidence and do not establish root causes; analysis CLI and report/export remain future work. No ML/LLM service is required.
+Tasks 0008 and 0010 provide a pure deterministic analysis API over stored TCP, DNS, and carrier observations. It can return local-link-related evidence, configured gateway-role target failure, multiple external targets failed, endpoint-specific evidence supported by another successful external target, DNS-query failure alongside independent external TCP success, or undetermined. DNS wording reports concurrent query failure evidence and does not establish causation or general reachability. Findings cite event IDs and include explanatory text, limitations, and a follow-up check. The 60-second correlation window is skipped when timestamps move backwards. These labels describe evidence and do not establish root causes; analysis CLI and report/export remain future work. No ML/LLM service is required.
 
 ### FR-07 Persistence and export
 

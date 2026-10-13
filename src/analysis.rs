@@ -1,6 +1,8 @@
 //! Conservative, evidence-citing rules over stored observations.
 
-use crate::event::{EventKind, ProbeFailureCategory, ProbeOutcome, ProbeRole, SCHEMA_VERSION};
+use crate::event::{
+    supports_schema_version, DnsOutcome, EventKind, ProbeFailureCategory, ProbeOutcome, ProbeRole,
+};
 use crate::incidents::Incident;
 use crate::storage::StoredEvent;
 use std::net::SocketAddr;
@@ -41,6 +43,7 @@ pub enum FindingClassification {
     ConfiguredGatewayTargetFailure,
     MultipleExternalTargetsFailed,
     EndpointSpecificEvidence,
+    DnsQueryFailureWithIndependentTcpSuccess,
     Undetermined,
 }
 
@@ -110,7 +113,7 @@ fn validate_events(events: &[StoredEvent]) -> Result<(), AnalysisError> {
             }
         }
         previous = Some(stored.sequence);
-        if stored.event.schema_version != SCHEMA_VERSION {
+        if !supports_schema_version(stored.event.schema_version) {
             return Err(AnalysisError::InvalidEventSchema(
                 stored.event.schema_version,
             ));
@@ -143,6 +146,7 @@ fn analyze_one(
 
     let mut probes = Vec::new();
     let mut carrier_down_ids = Vec::new();
+    let mut dns_failures = Vec::new();
     for stored in events {
         let in_window = !clock_adjusted
             && timestamps_monotonic
@@ -164,6 +168,11 @@ fn analyze_one(
                 carrier: Some(false),
                 ..
             } if in_window => carrier_down_ids.push((stored.sequence, stored.event.id.clone())),
+            EventKind::DnsResult { outcome, .. } if in_window => {
+                if matches!(outcome, DnsOutcome::Timeout | DnsOutcome::Failure(_)) {
+                    dns_failures.push((stored.event.id.clone(), outcome.clone()));
+                }
+            }
             _ => {}
         }
     }
@@ -227,6 +236,17 @@ fn analyze_one(
                     .map(|probe| probe.id.clone())
                     .collect::<Vec<_>>(),
             )
+    } else if !dns_failures.is_empty()
+        && probes.iter().any(|probe| {
+            probe.role == ProbeRole::External && probe.outcome == ProbeOutcome::Success
+        })
+    {
+        (
+            FindingClassification::DnsQueryFailureWithIndependentTcpSuccess,
+            "A configured DNS query failed while an independent external TCP target succeeded in the same correlation window. This is DNS-query failure evidence and does not establish that DNS caused the incident or that other destinations are unreachable.".to_owned(),
+            "Check the configured query name and compare DNS results with another independently configured target.".to_owned(),
+            dns_failures.iter().map(|(id, _)| id.clone()).collect(),
+        )
     } else if !successful_independent_targets.is_empty() && !has_other_target_failure {
         (
                 FindingClassification::EndpointSpecificEvidence,
@@ -257,7 +277,7 @@ fn analyze_one(
         "TCP probe outcomes describe only the configured IP:port endpoints.".to_owned(),
         "Gateway and external roles are labels supplied by the caller.".to_owned(),
         "No route-to-interface mapping is available to verify that a carrier observation affected this probe path.".to_owned(),
-        "DNS-specific causes remain undetermined because DNS observations are not collected."
+        "DNS-specific causes remain undetermined without a correlated DNS-query failure and independent TCP success; DNS observations describe only the explicitly configured query name."
             .to_owned(),
     ];
     if incident.contains_observation_gap {
@@ -314,7 +334,7 @@ mod tests {
         StoredEvent {
             sequence,
             event: Event {
-                schema_version: SCHEMA_VERSION,
+                schema_version: crate::event::SCHEMA_VERSION,
                 id: id.to_owned(),
                 recorded_at_utc: at.parse().unwrap(),
                 source: "synthetic".to_owned(),
@@ -618,5 +638,59 @@ mod tests {
         );
         assert!(AnalysisConfig::new(Duration::ZERO).is_err());
         assert!(AnalysisConfig::new(Duration::from_secs(86_401)).is_err());
+    }
+
+    #[test]
+    fn dns_failure_with_external_tcp_success_is_cautious_concurrent_evidence() {
+        let events = [
+            probe(
+                1,
+                "incident-fail-1",
+                "2026-10-13T00:00:00Z",
+                ProbeRole::External,
+                "192.0.2.1:443",
+                ProbeOutcome::Timeout,
+            ),
+            event(
+                2,
+                "dns-fail",
+                "2026-10-13T00:00:05Z",
+                EventKind::DnsResult {
+                    query_name: "example.com.".into(),
+                    started_at_utc: "2026-10-13T00:00:05Z".parse().unwrap(),
+                    elapsed_ms: 500,
+                    outcome: DnsOutcome::Failure(crate::event::DnsFailureCategory::NameNotFound),
+                },
+            ),
+            probe(
+                3,
+                "independent-success",
+                "2026-10-13T00:00:10Z",
+                ProbeRole::External,
+                "192.0.2.2:443",
+                ProbeOutcome::Success,
+            ),
+            probe(
+                4,
+                "incident-fail-2",
+                "2026-10-13T00:00:20Z",
+                ProbeRole::External,
+                "192.0.2.1:443",
+                ProbeOutcome::Timeout,
+            ),
+        ];
+        let findings =
+            analyze_incidents(&events, &incidents(&events), AnalysisConfig::default()).unwrap();
+        assert_eq!(
+            findings[0].classification,
+            FindingClassification::DnsQueryFailureWithIndependentTcpSuccess
+        );
+        assert_eq!(
+            findings[0].evidence_event_ids,
+            ["incident-fail-1", "incident-fail-2", "dns-fail"]
+        );
+        assert!(findings[0]
+            .explanation
+            .contains("does not establish that DNS caused"));
     }
 }
