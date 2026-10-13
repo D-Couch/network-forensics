@@ -66,7 +66,9 @@ boundaries, missing-database behavior, and that read-only access cannot write
 or alter the schema. They must not open the default user database.
 
 Analysis tests use synthetic ordered event streams and lifecycle incidents.
-They cover carrier-down evidence, caller-supplied gateway roles, endpoint
+They cover carrier-down and normalized kernel link-down/watchdog evidence,
+neutral link-up signals, out-of-window and backwards-timestamp suppression,
+caller-supplied gateway roles, endpoint
 specificity with an independent successful target, multiple external failures,
 stale evidence, backward timestamps, schema/sequence validation, and explicit
 undetermined limitations. They must not access the network or default database.

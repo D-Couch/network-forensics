@@ -1,7 +1,8 @@
 //! Conservative, evidence-citing rules over stored observations.
 
 use crate::event::{
-    supports_schema_version, DnsOutcome, EventKind, ProbeFailureCategory, ProbeOutcome, ProbeRole,
+    supports_schema_version, DnsOutcome, EventKind, KernelLinkSignalCategory, ProbeFailureCategory,
+    ProbeOutcome, ProbeRole,
 };
 use crate::incidents::Incident;
 use crate::storage::StoredEvent;
@@ -145,7 +146,7 @@ fn analyze_one(
     let upper_ms = end_at.timestamp_millis() + config.correlation_window.as_millis() as i64;
 
     let mut probes = Vec::new();
-    let mut carrier_down_ids = Vec::new();
+    let mut local_link_signal_ids = Vec::new();
     let mut dns_failures = Vec::new();
     for stored in events {
         let in_window = !clock_adjusted
@@ -167,7 +168,16 @@ fn analyze_one(
             EventKind::LinkStateChanged {
                 carrier: Some(false),
                 ..
-            } if in_window => carrier_down_ids.push((stored.sequence, stored.event.id.clone())),
+            } if in_window => {
+                local_link_signal_ids.push((stored.sequence, stored.event.id.clone()))
+            }
+            EventKind::KernelLinkSignal {
+                category:
+                    KernelLinkSignalCategory::LinkDown | KernelLinkSignalCategory::NetdevWatchdog,
+                ..
+            } if in_window => {
+                local_link_signal_ids.push((stored.sequence, stored.event.id.clone()))
+            }
             EventKind::DnsResult { outcome, .. } if in_window => {
                 if matches!(outcome, DnsOutcome::Timeout | DnsOutcome::Failure(_)) {
                     dns_failures.push((stored.event.id.clone(), outcome.clone()));
@@ -206,28 +216,27 @@ fn analyze_one(
         .filter(|probe| !external_failed_targets.contains(&probe.target))
         .collect::<Vec<_>>();
 
-    let (classification, explanation, suggested_follow_up, supporting_ids) = if !carrier_down_ids
-        .is_empty()
-    {
-        carrier_down_ids.sort_by_key(|(sequence, _)| *sequence);
-        (
+    let (classification, explanation, suggested_follow_up, supporting_ids) =
+        if !local_link_signal_ids.is_empty() {
+            local_link_signal_ids.sort_by_key(|(sequence, _)| *sequence);
+            (
                 FindingClassification::LocalLinkRelatedEvidence,
-                "A carrier-down observation occurred within the incident correlation window. This is local-link-related evidence, not a diagnosis of a physical cause.".to_owned(),
-                "Check the selected interface state and compare with another observation period.".to_owned(),
-                carrier_down_ids
+                "A carrier-down or normalized kernel link-down/watchdog observation occurred within the incident correlation window. This is local-link-related evidence, not a diagnosis of a physical cause or proof that the signal caused the incident.".to_owned(),
+                "Check the selected interface state and compare the kernel observation with another monitoring period.".to_owned(),
+                local_link_signal_ids
                     .into_iter()
                     .map(|(_, id)| id)
                     .collect::<Vec<_>>(),
             )
-    } else if incident.target.role == ProbeRole::Gateway {
-        (
+        } else if incident.target.role == ProbeRole::Gateway {
+            (
                 FindingClassification::ConfiguredGatewayTargetFailure,
                 "The configured gateway-role TCP target repeatedly failed. The role is caller-provided and does not verify that this endpoint is the active gateway.".to_owned(),
                 "Verify the configured target and compare it with interface and route observations.".to_owned(),
                 Vec::new(),
             )
-    } else if external_failed_targets.len() >= 2 {
-        (
+        } else if external_failed_targets.len() >= 2 {
+            (
                 FindingClassification::MultipleExternalTargetsFailed,
                 "Qualifying failures affected multiple configured external targets in the correlation window. This does not establish a shared upstream cause.".to_owned(),
                 "Compare these target results with a configured gateway-role probe and collect another observation period.".to_owned(),
@@ -236,19 +245,19 @@ fn analyze_one(
                     .map(|probe| probe.id.clone())
                     .collect::<Vec<_>>(),
             )
-    } else if !dns_failures.is_empty()
-        && probes.iter().any(|probe| {
-            probe.role == ProbeRole::External && probe.outcome == ProbeOutcome::Success
-        })
-    {
-        (
+        } else if !dns_failures.is_empty()
+            && probes.iter().any(|probe| {
+                probe.role == ProbeRole::External && probe.outcome == ProbeOutcome::Success
+            })
+        {
+            (
             FindingClassification::DnsQueryFailureWithIndependentTcpSuccess,
             "A configured DNS query failed while an independent external TCP target succeeded in the same correlation window. This is DNS-query failure evidence and does not establish that DNS caused the incident or that other destinations are unreachable.".to_owned(),
             "Check the configured query name and compare DNS results with another independently configured target.".to_owned(),
             dns_failures.iter().map(|(id, _)| id.clone()).collect(),
         )
-    } else if !successful_independent_targets.is_empty() && !has_other_target_failure {
-        (
+        } else if !successful_independent_targets.is_empty() && !has_other_target_failure {
+            (
                 FindingClassification::EndpointSpecificEvidence,
                 "A different configured external target succeeded while this target had qualifying failures. The evidence is target-specific and does not establish why this endpoint failed.".to_owned(),
                 "Check the affected endpoint and port independently, then compare another probe to the same endpoint if appropriate.".to_owned(),
@@ -257,14 +266,14 @@ fn analyze_one(
                     .map(|probe| probe.id.clone())
                     .collect::<Vec<_>>(),
             )
-    } else {
-        (
+        } else {
+            (
                 FindingClassification::Undetermined,
                 "The stored observations do not distinguish a fault domain for this target-level incident.".to_owned(),
                 "Collect independent gateway and external-target observations during the same period.".to_owned(),
                 Vec::new(),
             )
-    };
+        };
 
     let mut evidence_event_ids = incident.failure_event_ids.clone();
     for id in &incident.recovery_event_ids {
@@ -276,7 +285,7 @@ fn analyze_one(
     let mut limitations = vec![
         "TCP probe outcomes describe only the configured IP:port endpoints.".to_owned(),
         "Gateway and external roles are labels supplied by the caller.".to_owned(),
-        "No route-to-interface mapping is available to verify that a carrier observation affected this probe path.".to_owned(),
+        "No route-to-interface mapping is available to verify that a carrier or kernel journal observation affected this probe path.".to_owned(),
         "DNS-specific causes remain undetermined without a correlated DNS-query failure and independent TCP success; DNS observations describe only the explicitly configured query name."
             .to_owned(),
     ];
@@ -327,7 +336,7 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{Event, ProbeMethod};
+    use crate::event::{Event, KernelLinkSignalCategory, ProbeMethod};
     use crate::incidents::{analyze_events as group_incidents, IncidentConfig};
 
     fn event(sequence: i64, id: &str, at: &str, kind: EventKind) -> StoredEvent {
@@ -362,6 +371,23 @@ mod tests {
                 started_at_utc: at.parse().unwrap(),
                 elapsed_ms: 5,
                 outcome,
+            },
+        )
+    }
+
+    fn kernel_signal(
+        sequence: i64,
+        id: &str,
+        at: &str,
+        category: KernelLinkSignalCategory,
+    ) -> StoredEvent {
+        event(
+            sequence,
+            id,
+            at,
+            EventKind::KernelLinkSignal {
+                category,
+                interface: Some("eno1".to_owned()),
             },
         )
     }
@@ -414,6 +440,146 @@ mod tests {
             .limitations
             .iter()
             .any(|limitation| limitation.contains("DNS-specific")));
+    }
+
+    #[test]
+    fn kernel_link_down_and_watchdog_support_existing_local_link_finding() {
+        for (category, id) in [
+            (KernelLinkSignalCategory::LinkDown, "kernel-down"),
+            (KernelLinkSignalCategory::NetdevWatchdog, "kernel-watchdog"),
+        ] {
+            let events = [
+                kernel_signal(1, id, "2026-10-13T00:00:00Z", category),
+                probe(
+                    2,
+                    "fail-1",
+                    "2026-10-13T00:00:10Z",
+                    ProbeRole::External,
+                    "192.0.2.1:443",
+                    ProbeOutcome::Timeout,
+                ),
+                probe(
+                    3,
+                    "fail-2",
+                    "2026-10-13T00:00:20Z",
+                    ProbeRole::External,
+                    "192.0.2.1:443",
+                    ProbeOutcome::Timeout,
+                ),
+            ];
+            let finding =
+                &analyze_incidents(&events, &incidents(&events), AnalysisConfig::default())
+                    .unwrap()[0];
+            assert_eq!(
+                finding.classification,
+                FindingClassification::LocalLinkRelatedEvidence
+            );
+            assert!(finding
+                .evidence_event_ids
+                .iter()
+                .any(|event_id| event_id == id));
+            assert!(finding.explanation.contains("proof that the signal caused"));
+        }
+    }
+
+    #[test]
+    fn kernel_link_up_out_of_window_and_backwards_time_do_not_support_local_link_finding() {
+        let failures = || {
+            vec![
+                probe(
+                    1,
+                    "fail-1",
+                    "2026-10-13T00:00:00Z",
+                    ProbeRole::External,
+                    "192.0.2.1:443",
+                    ProbeOutcome::Timeout,
+                ),
+                probe(
+                    3,
+                    "fail-2",
+                    "2026-10-13T00:00:10Z",
+                    ProbeRole::External,
+                    "192.0.2.1:443",
+                    ProbeOutcome::Timeout,
+                ),
+            ]
+        };
+
+        let mut link_up = failures();
+        link_up.insert(
+            1,
+            kernel_signal(
+                2,
+                "kernel-up",
+                "2026-10-13T00:00:05Z",
+                KernelLinkSignalCategory::LinkUp,
+            ),
+        );
+        let finding = &analyze_incidents(&link_up, &incidents(&link_up), AnalysisConfig::default())
+            .unwrap()[0];
+        assert_eq!(finding.classification, FindingClassification::Undetermined);
+        assert!(!finding
+            .evidence_event_ids
+            .iter()
+            .any(|id| id == "kernel-up"));
+
+        let mut out_of_window = failures();
+        out_of_window.insert(
+            0,
+            kernel_signal(
+                0,
+                "stale-kernel-down",
+                "2026-10-12T23:58:00Z",
+                KernelLinkSignalCategory::LinkDown,
+            ),
+        );
+        let finding = &analyze_incidents(
+            &out_of_window,
+            &incidents(&out_of_window),
+            AnalysisConfig::default(),
+        )
+        .unwrap()[0];
+        assert_eq!(finding.classification, FindingClassification::Undetermined);
+        assert!(!finding
+            .evidence_event_ids
+            .iter()
+            .any(|id| id == "stale-kernel-down"));
+
+        let backwards = [
+            probe(
+                1,
+                "fail-1",
+                "2026-10-13T00:00:10Z",
+                ProbeRole::External,
+                "192.0.2.1:443",
+                ProbeOutcome::Timeout,
+            ),
+            kernel_signal(
+                2,
+                "backwards-kernel-down",
+                "2026-10-13T00:00:05Z",
+                KernelLinkSignalCategory::LinkDown,
+            ),
+            probe(
+                3,
+                "fail-2",
+                "2026-10-13T00:00:20Z",
+                ProbeRole::External,
+                "192.0.2.1:443",
+                ProbeOutcome::Timeout,
+            ),
+        ];
+        let finding = &analyze_incidents(
+            &backwards,
+            &incidents(&backwards),
+            AnalysisConfig::default(),
+        )
+        .unwrap()[0];
+        assert_eq!(finding.classification, FindingClassification::Undetermined);
+        assert!(!finding
+            .evidence_event_ids
+            .iter()
+            .any(|id| id == "backwards-kernel-down"));
     }
 
     #[test]

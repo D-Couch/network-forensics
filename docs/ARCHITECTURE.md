@@ -1,6 +1,6 @@
 # Technical Architecture
 
-**Status:** Describes the implemented M1 CLI, Tasks 0005–0013, and intended future architecture. Implemented behavior is labeled below; other sections describe targets, not existing components.
+**Status:** Describes the implemented M1 CLI, Tasks 0005–0014, and intended future architecture. Implemented behavior is labeled below; other sections describe targets, not existing components.
 
 ## 1. Logical flow
 
@@ -28,7 +28,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 - `monitor`: sequential round scheduling and cancellation (implemented); bounded fan-in remains a future reliability concern.
 - `storage`: SQLite persistence and migration (implemented in M2).
 - `incidents`: deterministic probe-target lifecycle over stored events (Task 0006) and read-only history CLI (Task 0007); derived-record persistence remains planned.
-- `analysis`: pure evidence-citing rules over stored event types (Tasks 0008/0010), exposed by read-only `analyze --latest`.
+- `analysis`: pure evidence-citing rules over stored event types (Tasks 0008/0010/0014), exposed by read-only `analyze --latest`.
 - `report`: pure versioned text/JSON reports, redacted by default (Task 0011); report file output remains future work.
 - `replay`: strict bounded JSON fixture replay through incident and analysis APIs (Task 0009); CLI replay remains planned.
 
@@ -151,12 +151,14 @@ Stored insertion sequence defines order. A forward timestamp gap beyond the conf
 
 ### Conservative analysis API
 
-Tasks 0008 and 0010 add `analysis::analyze_incidents`, a pure function over ordered
+Tasks 0008, 0010, and 0014 add `analysis::analyze_incidents`, a pure function over ordered
 stored events and lifecycle incidents. It returns one finding per incident with
 a classification, explanation, evidence IDs, limitations, and follow-up check.
-Its validated correlation window defaults to 60 seconds. Carrier-down evidence
-is described as local-link-related without claiming that the interface carried
-the probe path. Caller-provided gateway roles remain labels. Multiple external
+Its validated correlation window defaults to 60 seconds. Carrier-down,
+normalized kernel link-down, and watchdog evidence may support local-link-related
+findings without proving cause or claiming that the interface carried the probe
+path. Journal link-up and unrelated kernel messages are neutral. Caller-provided
+gateway roles remain labels. Multiple external
 target failures do not prove a shared cause; endpoint-specific evidence requires
 a distinct external target to succeed without a qualifying failure in the same
 window. A backward timestamp anywhere in stored sequence disables timestamp
