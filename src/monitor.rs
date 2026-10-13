@@ -284,8 +284,8 @@ mod tests {
             },
         );
         let stop = AtomicBool::new(false);
-        let mut output = Vec::new();
         let mut ids = 0;
+        let mut output = Vec::new();
         emit_cycle(
             &discovery(),
             &MonitorConfig::new(
@@ -304,7 +304,6 @@ mod tests {
             },
         )
         .unwrap();
-
         let lines: Vec<_> = std::str::from_utf8(&output).unwrap().lines().collect();
         assert_eq!(lines.len(), 3);
         let events: Vec<_> = lines
