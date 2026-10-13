@@ -26,6 +26,12 @@ The monitor's round tests use fake transport and clock implementations and
 validate the newline-delimited event output. Signal and CLI target validation
 should be tested without invoking a real network connection.
 
+Interface collection tests build synthetic sysfs trees for available, missing,
+invalid, and zero-valued counters. Tracker tests cover baseline and per-field
+deltas, partial unknown values, counter decreases, disappearing/reappearing
+interfaces, carrier and speed transitions, and deterministic event order. No
+routine test reads host counters or requires network access.
+
 DNS tests use an injected transport and clock; routine tests never query a
 resolver. Cover FQDN validation, opt-in CLI parsing, DNS result serialization
 without answer addresses, configured DNS event ordering and timeout, schema-v1

@@ -433,6 +433,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
 fn event_kind_name(kind: &EventKind) -> &'static str {
     match kind {
         EventKind::LinkStateChanged { .. } => "link_state_changed",
+        EventKind::LinkSpeedChanged { .. } => "link_speed_changed",
+        EventKind::InterfaceCounterDelta { .. } => "interface_counter_delta",
         EventKind::ProbeResult { .. } => "probe_result",
         EventKind::InterfaceSnapshot { .. } => "interface_snapshot",
         EventKind::DnsResult { .. } => "dns_result",

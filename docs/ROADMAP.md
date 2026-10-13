@@ -35,7 +35,8 @@ events, without persisting derived incident records.
 
 ## M4 — Reliable public beta
 
-- Add optional Linux journal correlation and relevant NIC counters where supported.
+- [x] **Task 0012 — Linux interface deltas:** record passive carrier/speed transitions and RX/TX error/drop counter deltas when sysfs exposes them.
+- Add optional Linux journal correlation.
 - Add CLI/TUI overview only if required to make incident review materially easier.
 - Harden bounded queues, limits, retention, privilege checks, suspend/resume, and privacy-safe exports.
 - CI on Linux, installation/distribution instructions, example sanitized reports, contributor documentation, selected open-source license.

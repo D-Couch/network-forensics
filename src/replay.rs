@@ -238,7 +238,7 @@ mod tests {
             Err(ReplayError::DuplicateEventId)
         ));
         assert!(matches!(
-            replay_json(&valid.replace("\"schema_version\": 1", "\"schema_version\": 3")),
+            replay_json(&valid.replace("\"schema_version\": 1", "\"schema_version\": 4")),
             Err(ReplayError::Json(_))
         ));
     }

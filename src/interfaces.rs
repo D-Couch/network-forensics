@@ -50,6 +50,24 @@ pub struct InterfaceState {
     /// Link speed in Mbps, when the driver reports a positive value.
     pub speed_mbps: Option<u64>,
     pub is_default_route: bool,
+    pub counters: InterfaceCounters,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InterfaceCounters {
+    pub rx_errors: Option<u64>,
+    pub tx_errors: Option<u64>,
+    pub rx_dropped: Option<u64>,
+    pub tx_dropped: Option<u64>,
+}
+
+impl InterfaceCounters {
+    pub fn sample_available(self) -> bool {
+        self.rx_errors.is_some()
+            || self.tx_errors.is_some()
+            || self.rx_dropped.is_some()
+            || self.tx_dropped.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +104,12 @@ fn discover_at(sys_class_net: &Path, route_file: &Path) -> io::Result<Discovery>
         let speed_mbps = read_trimmed(&path.join("speed"))
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|speed| *speed > 0);
+        let counters = InterfaceCounters {
+            rx_errors: read_counter(&path.join("statistics/rx_errors")),
+            tx_errors: read_counter(&path.join("statistics/tx_errors")),
+            rx_dropped: read_counter(&path.join("statistics/rx_dropped")),
+            tx_dropped: read_counter(&path.join("statistics/tx_dropped")),
+        };
 
         interfaces.push(InterfaceState {
             is_default_route: default_route.as_deref() == Some(name.as_str()),
@@ -93,6 +117,7 @@ fn discover_at(sys_class_net: &Path, route_file: &Path) -> io::Result<Discovery>
             operational_state,
             carrier,
             speed_mbps,
+            counters,
         });
     }
 
@@ -107,6 +132,10 @@ fn read_trimmed(path: &Path) -> Option<String> {
     fs::read_to_string(path)
         .ok()
         .map(|value| value.trim().to_owned())
+}
+
+fn read_counter(path: &Path) -> Option<u64> {
+    read_trimmed(path).and_then(|value| value.parse::<u64>().ok())
 }
 
 fn parse_default_route(contents: &str) -> Option<String> {
@@ -189,6 +218,10 @@ mod tests {
         fs::write(zeta.join("operstate"), "up\n").unwrap();
         fs::write(zeta.join("carrier"), "1\n").unwrap();
         fs::write(zeta.join("speed"), "1000\n").unwrap();
+        let stats = zeta.join("statistics");
+        fs::create_dir(&stats).unwrap();
+        fs::write(stats.join("rx_errors"), "3\n").unwrap();
+        fs::write(stats.join("tx_dropped"), "bad\n").unwrap();
         let alpha = net.join("alpha");
         fs::create_dir(&alpha).unwrap();
         fs::write(alpha.join("operstate"), "unknown\n").unwrap();
@@ -211,6 +244,9 @@ mod tests {
         assert!(!states[0].is_default_route);
         assert_eq!(states[1].carrier, Some(true));
         assert_eq!(states[1].speed_mbps, Some(1000));
+        assert_eq!(states[1].counters.rx_errors, Some(3));
+        assert_eq!(states[1].counters.tx_errors, None);
+        assert_eq!(states[1].counters.tx_dropped, None);
         assert!(states[1].is_default_route);
 
         fs::remove_dir_all(root).unwrap();
@@ -220,5 +256,17 @@ mod tests {
     fn zero_or_negative_speed_is_unavailable() {
         assert_eq!("0".parse::<u64>().ok().filter(|speed| *speed > 0), None);
         assert_eq!("-1".parse::<u64>().ok().filter(|speed| *speed > 0), None);
+    }
+
+    #[test]
+    fn counter_parser_preserves_missing_invalid_and_zero_values() {
+        let root = temp_dir();
+        let path = root.join("counter");
+        fs::write(&path, "0\n").unwrap();
+        assert_eq!(read_counter(&path), Some(0));
+        fs::write(&path, "-1\n").unwrap();
+        assert_eq!(read_counter(&path), None);
+        assert_eq!(read_counter(&root.join("missing")), None);
+        fs::remove_dir_all(root).unwrap();
     }
 }

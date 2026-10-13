@@ -42,7 +42,7 @@ Support a local default-gateway reachability probe and at least two independentl
 
 ### FR-03 Link/interface observation
 
-Track selected interface identity, operational state, carrier transitions, speed/duplex where available, and pertinent RX/TX error/drop counter deltas. Detect unexpected changes, including link-speed downshift. Missing capability is represented explicitly rather than synthesized.
+Track selected interface identity, operational state, carrier transitions, speed/duplex where available, and pertinent RX/TX error/drop counter deltas. Task 0012 implements passive Linux sysfs observations: monitoring compares carrier/speed and per-field counters with the prior in-memory sample, persists transition/delta events, and treats missing metrics or decreasing counters as unknown rather than synthesizing values or wraparound. Detect unexpected changes, including link-speed downshift. Missing capability is represented explicitly rather than synthesized.
 
 ### FR-04 Local evidence
 
