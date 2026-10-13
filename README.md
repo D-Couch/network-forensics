@@ -1,8 +1,8 @@
 # Network Forensics
 
-**Status:** Repository foundation, passive interface inventory, explicit one-shot TCP probes, foreground monitoring, and bounded local event persistence are implemented; incident analysis remains planned.
+**Status:** Repository foundation, passive interface inventory, explicit one-shot TCP probes, foreground monitoring, bounded local event persistence, and a deterministic probe-incident lifecycle core are implemented.
 
-Network Forensics is a Linux-first, privacy-conscious network diagnostic tool in early development. The current CLI inventories local interfaces, performs explicitly configured TCP connection probes, and emits foreground observations. The longer-term goal is to connect connectivity failures to local interface, routing, DNS, and system evidence. Historical storage, incident detection, and explanations are not implemented yet.
+Network Forensics is a Linux-first, privacy-conscious network diagnostic tool in early development. The current CLI inventories local interfaces, performs explicitly configured TCP connection probes, and emits foreground observations. A pure Rust API groups stored probe events into conservative target-level incidents; incident history is not yet exposed in the CLI, and diagnostic explanations remain planned.
 
 Unlike a ping-only monitor, it aims to distinguish observed facts from inferred fault domains. The intended initial executable is `netforensics`.
 
@@ -26,6 +26,8 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   validated against routing state.
 - `netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]` emits newline-delimited JSON interface snapshots and probe results until Ctrl+C, and stores each cycle locally in SQLite. It requires two distinct external targets and accepts one optional gateway target. Probes run sequentially with no retries or overlapping rounds. The interval is a pause after each round completes: it defaults to 10000 ms and is bounded to 1000–3600000 ms. A Ctrl+C waits for the in-progress probe to finish or time out (at most 30000 ms).
 
+The incident lifecycle API analyzes stored/synthetic events without I/O. By default, two consecutive timeouts or network/host-unreachable results for the same role and IP:port within 30 seconds open an incident; two consecutive successful probes recover it. Refused, ambiguous, unsupported, or blocked outcomes do not qualify. Gaps over 60 seconds and backward timestamps reset streaks and are retained as uncertainty markers. Derived incidents are not separately persisted and have no CLI listing yet.
+
 The database is `$XDG_DATA_HOME/netforensics/events.sqlite3`, or
 `$HOME/.local/share/netforensics/events.sqlite3` when XDG_DATA_HOME is unset.
 On Unix, the application directory is owner-only (`0700`) and the database is
@@ -38,12 +40,12 @@ before deleting the database file to clear history.
 
 ## Planned capabilities
 
-- Incident grouping, recovery and missing-observation handling, plus history queries.
+- Paged incident-history CLI and related end-to-end history workflows.
 - DNS-specific probes and interface change tracking with selected counters.
 - Explainable, conservative rule-based incident analysis and human/JSON reports.
 - Replayable synthetic incidents for deterministic diagnosis tests.
 
-These are **planned features**, not currently implemented.
+These are **planned features**, not currently implemented. The incident lifecycle core is available as a Rust API; CLI history queries and persistence of derived incident records remain planned.
 
 ## Safety and privacy
 

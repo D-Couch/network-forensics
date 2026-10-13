@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime};
 pub const DEFAULT_TIMEOUT_MILLIS: u64 = 3_000;
 pub const MAX_TIMEOUT_MILLIS: u64 = 30_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProbeTarget {
     pub role: ProbeRole,
     pub address: SocketAddr,

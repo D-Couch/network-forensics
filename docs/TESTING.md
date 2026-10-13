@@ -32,6 +32,13 @@ rollback, age/count retention, path validation, Unix permissions, and symlink
 refusal. Tests must not open the default user database or rely on environment
 paths.
 
+Incident lifecycle tests use synthetic stored events and the pure analysis API.
+They cover per-target separation, qualifying and inconclusive outcomes,
+threshold windows, opening and recovery, repeat episodes, insertion-sequence
+validation, schema rejection, forward observation gaps, backward timestamps,
+and configuration bounds. They must not create network connections or open the
+default event database.
+
 The routine test suite must remain deterministic and must not invoke live probe
 targets. Manual interface inventory can read the host's sysfs/procfs and is
 environment-dependent; it is not a substitute for the fixture-based unit tests.

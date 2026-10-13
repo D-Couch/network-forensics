@@ -1,4 +1,5 @@
 pub mod event;
+pub mod incidents;
 pub mod interfaces;
 pub mod monitor;
 pub mod probes;

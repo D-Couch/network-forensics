@@ -50,7 +50,7 @@ Optionally consume relevant kernel/journald observations with documented permiss
 
 ### FR-05 Incidents
 
-Group temporally related failures and recovery signals into incidents with a stable ID, start/end, impacted probes, and supporting events. Retain incidents that are unresolved or only partially observed. Use configurable durations/debounce to avoid one transient probe failure becoming an outage.
+The Task 0006 pure Rust lifecycle API groups stored probe events by exact role and numeric IP:port. Two consecutive timeout, network-unreachable, or host-unreachable outcomes within the default 30-second window open an incident; two consecutive successes recover it. Refused, ambiguous, unsupported, and blocked outcomes do not qualify. Validated configuration controls thresholds and windows, and sequence order plus gap/clock-adjustment markers preserve uncertainty. Incident history CLI and persistence of derived incident records remain future work.
 
 ### FR-06 Diagnosis
 
