@@ -43,6 +43,18 @@ requires no elevated privileges. Missing or unsupported sysfs values remain
 unknown; the CLI reports an unavailable default route when it cannot identify
 one.
 
+### Current probe runner
+
+The one-shot CLI probe accepts a role and numeric IP:port explicitly, then makes
+one TCP connection attempt with a 3000 ms default timeout capped at 30000 ms.
+It does not perform DNS resolution, retry, or select public targets. The runner
+records a UTC start timestamp and monotonic elapsed milliseconds in a typed
+`probe_result` event. Transport and clock traits allow deterministic tests
+without network access. TCP success or failure applies only to the configured
+endpoint and port; it is not a general Internet reachability conclusion. The
+gateway/external role is caller-provided metadata, not an independently
+verified network location.
+
 ## 3. Event envelope v1
 
 Use a serde-compatible Rust structure with fields equivalent to:

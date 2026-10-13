@@ -1,6 +1,6 @@
 # Task 0001 — Rust repository foundation
 
-**Status:** Ready for Codex  
+**Status:** Complete
 **Milestone:** M1  
 **Scope:** One task only — no live monitoring
 

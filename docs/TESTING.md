@@ -18,6 +18,10 @@ cargo build
 
 The commands should be executed where available; failures and missing tools must be reported verbatim. No tests are claimed to have run before code exists.
 
+The current probe tests inject both transport outcomes and clock readings. They
+must remain network-independent; do not add live endpoint checks to the routine
+test suite.
+
 ## Test layers
 
 1. **Model and schema:** round-trip serialization, version enforcement, malformed input, invalid/unknown fields policy, unknown-versus-false semantics.

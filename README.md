@@ -1,6 +1,6 @@
 # Network Forensics
 
-**Status:** Repository foundation and passive interface inventory are implemented; monitoring and analysis remain planned.
+**Status:** Repository foundation, passive interface inventory, and explicit one-shot TCP probes are implemented; background monitoring and analysis remain planned.
 
 Network Forensics is a Linux-first, privacy-conscious network diagnostic tool that connects observed connectivity failures to local interface, routing, DNS, and system events. It helps answer *what happened, when, what evidence supports an explanation, and what to check next*.
 
@@ -17,11 +17,18 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   reported speed, and the interface on the lowest-metric active default route
   when available. Missing sysfs/procfs values appear as unavailable. The
   command reads `/sys/class/net` and `/proc/net/route` only.
+- `netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]` attempts one
+  TCP connection to an explicitly supplied numeric address. It does not resolve
+  names or use default endpoints. The default timeout is 3000 ms, with a
+  validated range of 1–30000 ms. A successful connection only describes that
+  address and port; it does not establish general Internet connectivity. The
+  gateway/external role is a caller-supplied label and is not independently
+  validated against routing state.
 
 ## Planned capabilities
 
 - Periodic local-gateway and multiple external endpoint probes, with explicit handling of blocked/unresponsive probe methods.
-- Interface change tracking, selected counters, active probes, and monitoring.
+- Interface change tracking, selected counters, scheduled probes, and monitoring.
 - Timestamped local evidence and persistent SQLite incident history.
 - Explainable, conservative rule-based incident analysis and human/JSON reports.
 - Replayable synthetic incidents for deterministic diagnosis tests.

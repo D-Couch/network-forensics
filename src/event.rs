@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
+use std::net::SocketAddr;
 
 pub const SCHEMA_VERSION: u16 = 1;
 
@@ -11,6 +12,52 @@ pub enum EventKind {
         /// `None` means the carrier state was unavailable; `Some(false)` means carrier was down.
         carrier: Option<bool>,
     },
+    ProbeResult {
+        role: ProbeRole,
+        target: SocketAddr,
+        method: ProbeMethod,
+        started_at_utc: DateTime<Utc>,
+        elapsed_ms: u64,
+        outcome: ProbeOutcome,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeRole {
+    Gateway,
+    External,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeMethod {
+    TcpConnect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "category", rename_all = "snake_case")]
+pub enum ProbeOutcome {
+    Success,
+    Timeout,
+    Failure(ProbeFailureCategory),
+    UnsupportedOrBlocked(ProbeLimitationCategory),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeFailureCategory {
+    ConnectionRefused,
+    NetworkUnreachable,
+    HostUnreachable,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeLimitationCategory {
+    PermissionDenied,
+    MethodUnsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -122,5 +169,29 @@ mod tests {
             "\"source\": \"interface\", \"extra\": true",
         );
         assert!(Event::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn round_trips_typed_probe_result() {
+        let event = Event {
+            schema_version: SCHEMA_VERSION,
+            id: "probe-1".into(),
+            recorded_at_utc: "2026-01-01T00:00:00Z".parse().unwrap(),
+            source: "probe".into(),
+            kind: EventKind::ProbeResult {
+                role: ProbeRole::External,
+                target: "203.0.113.8:443".parse().unwrap(),
+                method: ProbeMethod::TcpConnect,
+                started_at_utc: "2026-01-01T00:00:00Z".parse().unwrap(),
+                elapsed_ms: 17,
+                outcome: ProbeOutcome::Failure(ProbeFailureCategory::ConnectionRefused),
+            },
+        };
+
+        let json = event.to_json().unwrap();
+        assert!(json.contains("\"type\": \"probe_result\""));
+        assert!(json.contains("\"role\": \"external\""));
+        assert!(json.contains("\"target\": \"203.0.113.8:443\""));
+        assert_eq!(Event::from_json(&json).unwrap(), event);
     }
 }
