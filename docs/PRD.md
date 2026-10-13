@@ -46,7 +46,7 @@ Track selected interface identity, operational state, carrier transitions, speed
 
 ### FR-04 Local evidence
 
-Optionally consume relevant kernel/journald observations with documented permission requirements. This is a later milestone; monitoring must still function when journal access is unavailable.
+Task 0013 implements opt-in sampling of a small allowlist of kernel journal link messages. It stores normalized link-up, link-down, and NETDEV WATCHDOG categories, not raw messages. It uses the invoking user's existing journal access without requesting elevation; unavailable access degrades observability and does not stop monitoring.
 
 ### FR-05 Incidents
 

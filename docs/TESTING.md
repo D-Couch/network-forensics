@@ -32,6 +32,11 @@ deltas, partial unknown values, counter decreases, disappearing/reappearing
 interfaces, carrier and speed transitions, and deterministic event order. No
 routine test reads host counters or requires network access.
 
+Kernel journal parsing uses synthetic JSON entries and an injected reader.
+Tests cover allowlisted normalized categories, ignored messages, invalid
+interface names, malformed or oversized output, in-memory cursor progression,
+and unavailable access. Routine tests never invoke the host's `journalctl`.
+
 DNS tests use an injected transport and clock; routine tests never query a
 resolver. Cover FQDN validation, opt-in CLI parsing, DNS result serialization
 without answer addresses, configured DNS event ordering and timeout, schema-v1

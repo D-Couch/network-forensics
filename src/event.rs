@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::net::SocketAddr;
 
-pub const SCHEMA_VERSION: u16 = 3;
+pub const SCHEMA_VERSION: u16 = 4;
 pub const MIN_SUPPORTED_SCHEMA_VERSION: u16 = 1;
 
 pub const fn supports_schema_version(version: u16) -> bool {
@@ -32,6 +32,10 @@ pub enum EventKind {
         rx_dropped_delta: Option<u64>,
         tx_dropped_delta: Option<u64>,
     },
+    KernelLinkSignal {
+        category: KernelLinkSignalCategory,
+        interface: Option<String>,
+    },
     ProbeResult {
         role: ProbeRole,
         target: SocketAddr,
@@ -53,6 +57,14 @@ pub enum EventKind {
         elapsed_ms: u64,
         outcome: DnsOutcome,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KernelLinkSignalCategory {
+    LinkUp,
+    LinkDown,
+    NetdevWatchdog,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,7 +202,7 @@ mod tests {
     fn round_trips_stable_json_shape() {
         let original = event(Some(false));
         let json = original.to_json().unwrap();
-        assert!(json.contains("\"schema_version\": 3"));
+        assert!(json.contains("\"schema_version\": 4"));
         assert!(json.contains("\"type\": \"link_state_changed\""));
         assert_eq!(Event::from_json(&json).unwrap(), original);
     }
@@ -200,12 +212,12 @@ mod tests {
         let json = event(Some(true))
             .to_json()
             .unwrap()
-            .replace("\"schema_version\": 3", "\"schema_version\": 4");
+            .replace("\"schema_version\": 4", "\"schema_version\": 5");
         assert!(Event::from_json(&json)
             .unwrap_err()
             .to_string()
             .to_string()
-            .contains("unsupported schema_version 4"));
+            .contains("unsupported schema_version 5"));
     }
 
     #[test]
@@ -213,7 +225,7 @@ mod tests {
         let json = event(Some(true))
             .to_json()
             .unwrap()
-            .replace("\"schema_version\": 3", "\"schema_version\": 1");
+            .replace("\"schema_version\": 4", "\"schema_version\": 1");
         assert_eq!(Event::from_json(&json).unwrap().schema_version, 1);
     }
 

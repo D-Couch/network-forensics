@@ -24,7 +24,7 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   address and port; it does not establish general Internet connectivity. The
   gateway/external role is a caller-supplied label and is not independently
   validated against routing state.
-- `netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]` emits newline-delimited JSON interface snapshots, carrier/speed transitions, available RX/TX error/drop counter deltas, and probe results until Ctrl+C, and stores each cycle locally in SQLite. It requires two distinct external targets and accepts one optional gateway target. DNS is queried only when the single optional `--dns-name` is provided; it must be a fully qualified ASCII name ending in a dot, such as `example.com.`. The configured system nameserver setup is used; `/etc/hosts` is bypassed. TCP and DNS observations run sequentially with no application retry or overlapping rounds and use the configured bounded timeout. The interval is a pause after each round completes: it defaults to 10000 ms and is bounded to 1000–3600000 ms. A Ctrl+C waits for the in-progress bounded probe to finish.
+- `netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]` emits newline-delimited JSON interface snapshots, carrier/speed transitions, available RX/TX error/drop counter deltas, and probe results until Ctrl+C, and stores each cycle locally in SQLite. Kernel journal sampling is disabled by default and enabled only with `--kernel-journal`; only normalized link-up/down and watchdog categories are stored, and unavailable access does not stop monitoring. It requires two distinct external targets and accepts one optional gateway target. DNS is queried only when the single optional `--dns-name` is provided; it must be a fully qualified ASCII name ending in a dot, such as `example.com.`. The configured system nameserver setup is used; `/etc/hosts` is bypassed. TCP and DNS observations run sequentially with no application retry or overlapping rounds and use the configured bounded timeout. The interval is a pause after each round completes: it defaults to 10000 ms and is bounded to 1000–3600000 ms. A Ctrl+C waits for the in-progress bounded probe to finish.
 - `netforensics incidents` reads the existing local database without creating or changing it, then lists incidents derived from stored probe events. It reports target, status, event sequence/times, evidence IDs, and gap/clock-adjustment uncertainty. It makes no network connections and does not store derived incidents. If there is no event database, the command reports that history is not available yet.
 - `netforensics analyze --latest` prints conservative findings for derived incidents. `netforensics report --latest` renders a text report; add `--format json` for versioned JSON. Target addresses are redacted to stable role-scoped labels by default. `--include-identifiers` includes configured target addresses and prints a warning to stderr. Reports retain event IDs and timestamps, omit raw event payloads and DNS query names, and read the database without modifying it.
 
@@ -32,12 +32,19 @@ The incident lifecycle API analyzes stored/synthetic events without I/O. By defa
 
 The analysis API and CLI provide deterministic, evidence-cited findings using a 60-second correlation window. They can identify local-link-related evidence, failures at the caller-configured gateway-role target, failures across multiple external targets, endpoint-specific evidence when a separate external target succeeds, and a failed configured DNS query alongside independent external TCP success. DNS wording describes concurrent query failure evidence, not proof DNS caused an incident or that the Internet is unavailable. Other cases remain undetermined; findings cite event IDs and state limitations, and do not diagnose root causes.
 
-DNS query names are persisted in the private local event database because they can identify people or organizations; answer counts are retained, returned IP addresses are not. Event schema v3 is written, while schema-v1 and schema-v2 history remain readable. Hickory uses system resolver configuration but does not reproduce every host NSS/resolver behavior; see [ADR 0004](docs/decisions/0004-system-configured-dns-observation.md).
+DNS query names are persisted in the private local event database because they can identify people or organizations; answer counts are retained, returned IP addresses are not. Event schema v4 is written, while schema-v1 through schema-v3 history remain readable. Hickory uses system resolver configuration but does not reproduce every host NSS/resolver behavior; see [ADR 0004](docs/decisions/0004-system-configured-dns-observation.md).
 
 Foreground monitoring also observes known carrier and reported-speed transitions
 and per-round RX/TX error/drop counter deltas from sysfs. Cumulative counters
 remain in memory only; unavailable metrics stay unknown, and counter decreases
 are recorded as possible resets without guessing wraparound. See [ADR 0006](docs/decisions/0006-linux-interface-counter-deltas.md).
+
+Kernel link messages are collected only when monitoring is started with
+`--kernel-journal`. The collector recognizes link-up, link-down, and
+`NETDEV WATCHDOG` messages, persists normalized categories and optional
+interface names, and discards raw text. It uses the current user's journal
+permissions and continues monitoring with a one-time warning when access is
+unavailable. See [ADR 0007](docs/decisions/0007-kernel-journal-link-signals.md).
 
 The replay API accepts strict JSON fixtures with an independent fixture schema version, event insertion sequences, and versioned event objects. It runs the same lifecycle and analysis APIs without networking or database access. Input is limited to 16 MiB and 100,000 events; fixture cases and expected results live under `tests/fixtures/`. There is no user-facing replay command yet.
 
@@ -53,13 +60,13 @@ before deleting the database file to clear history.
 
 ## Planned capabilities
 
-- Optional journal correlation and additional interface evidence rules.
+- Additional interface evidence rules.
 
 These are **planned features**, not currently implemented. Derived incident persistence and report file export remain planned.
 
 ## Safety and privacy
 
-Read-only monitoring by default; no packet payload collection, network configuration changes, or runtime telemetry. The current monitor makes only the TCP connections explicitly configured by the user and sends DNS queries only for an explicitly configured name. Local event history can contain IP addresses, interface names, and DNS query names; it is stored in a per-user database with restrictive Unix permissions and is never synced by the application. Reports redact target addresses by default; `--include-identifiers` opts into including configured target addresses and emits a warning. Additional privileges and log collection will be opt-in and documented.
+Read-only monitoring by default; no packet payload collection, network configuration changes, or runtime telemetry. The current monitor makes only the TCP connections explicitly configured by the user and sends DNS queries only for an explicitly configured name. Kernel journal sampling is separately opt-in and uses the current user's existing permissions. Local event history can contain IP addresses, interface names, and DNS query names; it is stored in a per-user database with restrictive Unix permissions and is never synced by the application. Reports redact target addresses by default; `--include-identifiers` opts into including configured target addresses and emits a warning.
 
 ## Project documents
 
@@ -95,11 +102,11 @@ cargo fmt --check
 cargo clippy -- -D warnings
 ```
 
-The event JSON representation is versioned. New events use schema version 3; events from schema versions 1 and 2 remain readable:
+The event JSON representation is versioned. New events use schema version 4; events from schema versions 1 through 3 remain readable:
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "event-1",
   "recorded_at_utc": "2026-01-01T00:00:00Z",
   "source": "interface",
@@ -113,7 +120,7 @@ The event JSON representation is versioned. New events use schema version 3; eve
 
 The caller assigns `id` and is responsible for uniqueness in its collection.
 `carrier: null` represents unavailable carrier state, while `false` means the
-carrier was observed down. Deserialization accepts schema versions 1, 2, and 3
+carrier was observed down. Deserialization accepts schema versions 1 through 4
 and rejects unsupported versions and unknown fields. The event
 model also represents TCP and DNS probe results, interface snapshots, speed
 transitions, and counter deltas. DNS

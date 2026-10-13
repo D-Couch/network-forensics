@@ -141,6 +141,7 @@ pub struct MonitorConfig {
     pub targets: Vec<ProbeTarget>,
     pub retention: RetentionPolicy,
     pub dns_name: Option<DnsName>,
+    pub kernel_journal: bool,
 }
 
 impl MonitorConfig {
@@ -206,11 +207,17 @@ impl MonitorConfig {
             targets,
             retention,
             dns_name: None,
+            kernel_journal: false,
         })
     }
 
     pub fn with_dns_name(mut self, dns_name: Option<DnsName>) -> Self {
         self.dns_name = dns_name;
+        self
+    }
+
+    pub fn with_kernel_journal(mut self, enabled: bool) -> Self {
+        self.kernel_journal = enabled;
         self
     }
 }
@@ -281,6 +288,30 @@ pub struct CycleInput<'a> {
     pub recorded_at: DateTime<Utc>,
 }
 
+fn append_journal_events<R, F>(
+    events: &mut Vec<Event>,
+    collector: &mut crate::journal::KernelJournalCollector<R>,
+    recorded_at_utc: DateTime<Utc>,
+    warning_reported: &mut bool,
+    next_id: F,
+) -> Option<crate::journal::JournalError>
+where
+    R: crate::journal::KernelJournalReader,
+    F: FnMut() -> String,
+{
+    match collector.collect(recorded_at_utc, next_id) {
+        Ok(mut journal_events) => {
+            events.append(&mut journal_events);
+            None
+        }
+        Err(error) if !*warning_reported => {
+            *warning_reported = true;
+            Some(error)
+        }
+        Err(_) => None,
+    }
+}
+
 fn write_event<W: Write>(writer: &mut W, event: &Event) -> io::Result<()> {
     let serialized = serde_json::to_string(event).map_err(io::Error::other)?;
     writeln!(writer, "{serialized}")
@@ -318,6 +349,10 @@ pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
         )),
         None => None,
     };
+    let mut journal_collector = config.kernel_journal.then(|| {
+        crate::journal::KernelJournalCollector::new(crate::journal::SystemKernelJournalReader)
+    });
+    let mut journal_warning_reported = false;
 
     while !stop.load(Ordering::Acquire) {
         let discovery = match interfaces::discover() {
@@ -331,7 +366,7 @@ pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
             }
         };
         let cycle_time = DateTime::<Utc>::from(SystemTime::now());
-        let events = if let Some(dns_runner) = &mut dns_runner {
+        let mut events = if let Some(dns_runner) = &mut dns_runner {
             collect_cycle_with_dns(
                 &config,
                 &mut interface_tracker,
@@ -355,6 +390,19 @@ pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
                 crate::next_event_id,
             )
         };
+        if let Some(collector) = &mut journal_collector {
+            if let Some(error) = append_journal_events(
+                &mut events,
+                collector,
+                cycle_time,
+                &mut journal_warning_reported,
+                crate::next_event_id,
+            ) {
+                eprintln!(
+                    "Kernel journal observations unavailable ({error:?}); continuing without them."
+                );
+            }
+        }
         persist_then_write(&mut store, &events, &mut writer)?;
         writer.flush()?;
         if !stop.load(Ordering::Acquire) {
@@ -600,6 +648,101 @@ mod tests {
         assert!(events[..events.len() - 1]
             .iter()
             .all(|event| !matches!(event.kind, EventKind::DnsResult { .. })));
+    }
+
+    #[test]
+    fn unavailable_optional_journal_keeps_cycle_events_and_warns_only_once() {
+        struct DeniedReader;
+        impl crate::journal::KernelJournalReader for DeniedReader {
+            fn read_since(
+                &mut self,
+                _cursor: Option<&str>,
+            ) -> Result<Vec<u8>, crate::journal::JournalError> {
+                Err(crate::journal::JournalError::Unavailable)
+            }
+        }
+
+        let mut collector = crate::journal::KernelJournalCollector::new(DeniedReader);
+        let mut events = vec![Event {
+            schema_version: crate::event::SCHEMA_VERSION,
+            id: "existing".into(),
+            recorded_at_utc: "2026-10-13T00:00:00Z".parse().unwrap(),
+            source: "interface".into(),
+            kind: EventKind::LinkStateChanged {
+                interface: "eno1".into(),
+                carrier: Some(false),
+            },
+        }];
+        let mut warning_reported = false;
+        assert_eq!(
+            append_journal_events(
+                &mut events,
+                &mut collector,
+                "2026-10-13T00:00:00Z".parse().unwrap(),
+                &mut warning_reported,
+                || "journal".into(),
+            ),
+            Some(crate::journal::JournalError::Unavailable)
+        );
+        assert_eq!(events.len(), 1);
+        assert!(warning_reported);
+        assert_eq!(
+            append_journal_events(
+                &mut events,
+                &mut collector,
+                "2026-10-13T00:00:00Z".parse().unwrap(),
+                &mut warning_reported,
+                || "journal".into(),
+            ),
+            None
+        );
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn normalized_journal_signal_is_persisted_in_the_same_cycle() {
+        struct SignalReader;
+        impl crate::journal::KernelJournalReader for SignalReader {
+            fn read_since(
+                &mut self,
+                _cursor: Option<&str>,
+            ) -> Result<Vec<u8>, crate::journal::JournalError> {
+                Ok(br#"{"__CURSOR":"cursor","MESSAGE":"eno1: Link is Down","__REALTIME_TIMESTAMP":"1791849600000000"}"#.to_vec())
+            }
+        }
+
+        let mut collector = crate::journal::KernelJournalCollector::new(SignalReader);
+        let mut events = Vec::new();
+        let mut warning_reported = false;
+        assert_eq!(
+            append_journal_events(
+                &mut events,
+                &mut collector,
+                "2026-10-13T00:00:00Z".parse().unwrap(),
+                &mut warning_reported,
+                || "journal-event".into(),
+            ),
+            None
+        );
+        let mut store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
+        let mut output = Vec::new();
+        persist_then_write(&mut store, &events, &mut output).unwrap();
+        let stored = store.read_events_after(0, 10).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert!(matches!(
+            stored[0].event.kind,
+            EventKind::KernelLinkSignal {
+                category: crate::event::KernelLinkSignalCategory::LinkDown,
+                interface: Some(ref interface)
+            } if interface == "eno1"
+        ));
+        assert_eq!(
+            output
+                .split(|byte| *byte == b'\n')
+                .filter(|line| !line.is_empty())
+                .count(),
+            1
+        );
     }
 
     fn sample(
