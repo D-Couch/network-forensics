@@ -40,7 +40,8 @@ events, without persisting derived incident records.
 - [x] **Task 0014 — Kernel link analysis:** allow correlated link-down/watchdog observations to support existing local-link evidence.
 - Add CLI/TUI overview only if required to make incident review materially easier.
 - Harden bounded queues, limits, retention, privilege checks, suspend/resume, and privacy-safe exports.
-- CI on Linux, installation/distribution instructions, example sanitized reports, contributor documentation, selected open-source license.
+- [x] **Task 0015 — Linux CI:** run formatting, tests, Clippy, and build on pushes and pull requests.
+- Installation/distribution instructions, example sanitized reports, contributor documentation, selected open-source license.
 
 **M4 exit:** An unrelated Linux user can install, monitor, investigate a problem, and share a sanitized report with documented limitations.
 

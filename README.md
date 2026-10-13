@@ -131,4 +131,8 @@ metadata.
 
 ## Contribution and licensing
 
+GitHub Actions runs `cargo fmt --check`, `cargo test`,
+`cargo clippy -- -D warnings`, and `cargo build` on Linux for pushes and pull requests. The same
+commands are listed above for local verification.
+
 The GitHub repository is public, but this project has no license file. Public visibility does not itself grant permission to use, modify, or redistribute the code. Choose and add a license before inviting reuse or accepting contributions; also establish contribution and release policies before a release.

@@ -18,6 +18,10 @@ cargo build
 
 Run these checks after relevant changes; failures and missing tools must be reported accurately. Task 0001 is complete, and the package now also includes interface, probe, and monitor behavior.
 
+The GitHub Actions Linux workflow runs those four commands on every push and
+pull request, and supports manual dispatch. It uses a read-only repository
+token and does not run the environment-dependent system smoke checks.
+
 The current probe tests inject both transport outcomes and clock readings. They
 must remain network-independent; do not add live endpoint checks to the routine
 test suite.
