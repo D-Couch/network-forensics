@@ -50,6 +50,14 @@ specificity with an independent successful target, multiple external failures,
 stale evidence, backward timestamps, schema/sequence validation, and explicit
 undetermined limitations. They must not access the network or default database.
 
+Replay tests consume human-readable, versioned fixtures under
+`tests/fixtures/`, with a separate `expected.json` for each scenario. They run
+the same incident and analysis APIs twice to verify deterministic results and
+cover supported link/endpoint findings plus undetermined cases. Parser tests
+reject malformed or unknown fields, future schemas, bad ordering, duplicate
+IDs, inputs over 16 MiB, and event counts over 100000. Replay never accesses
+the network or default database.
+
 The routine test suite must remain deterministic and must not invoke live probe
 targets. Manual interface inventory can read the host's sysfs/procfs and is
 environment-dependent; it is not a substitute for the fixture-based unit tests.
@@ -66,7 +74,12 @@ environment-dependent; it is not a substitute for the fixture-based unit tests.
 
 ## Fixture format
 
-Keep versioned, human-readable JSON fixtures under `tests/fixtures/` when replay is implemented. Each scenario has events and a separate expected-results declaration so test failures are interpretable. Ordering should be explicit and unaffected by local timezone. Example future fixture names:
+Keep versioned, human-readable JSON fixtures under `tests/fixtures/`. Each
+scenario has events and a separate expected-results declaration so test
+failures are interpretable. Ordering should be explicit and unaffected by
+local timezone. The current envelope uses `fixture_schema_version`, plus
+entries containing a stored `sequence` and event-v1 `event` object. Example
+scenarios:
 
 - `carrier-loss-then-gateway-failure`
 - `dns-only-failure-with-ip-reachability`

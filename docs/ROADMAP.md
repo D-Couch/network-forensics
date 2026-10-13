@@ -27,7 +27,7 @@ events, without persisting derived incident records.
 
 - [x] **Task 0008 — Conservative analysis core:** deterministic evidence-citing Rust API over current probe and carrier observations; unsupported cases remain undetermined.
 - Add DNS observations and carefully scoped rules for local link, gateway/LAN, DNS, upstream path, endpoint-only, and undetermined cases.
-- Add deterministic versioned-fixture replay through the same analysis engine.
+- [x] **Task 0009 — Versioned fixture replay:** strict, bounded offline fixtures run through the incident and analysis APIs.
 - Support `analyze --latest`, human-readable and sanitized JSON `report --latest`.
 - Test false-positive avoidance, uncertainty, source availability, timestamp ordering, and ambiguous signals.
 

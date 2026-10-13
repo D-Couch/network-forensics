@@ -4,6 +4,7 @@ pub mod incidents;
 pub mod interfaces;
 pub mod monitor;
 pub mod probes;
+pub mod replay;
 pub mod storage;
 
 use crate::event::{

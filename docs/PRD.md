@@ -62,7 +62,7 @@ Persist records locally in SQLite, with schema migration strategy, retention opt
 
 ### FR-08 Replay
 
-Support deterministic replay from versioned event fixtures into the same classification logic as live events. Tests must not require a live network or elevated privileges.
+Task 0009 provides a pure API for deterministic replay of strict, versioned JSON event fixtures through the same incident and analysis logic. Fixture schema version is independent from the event schema; entries carry insertion sequence and must already be ordered. Inputs are limited to 16 MiB and 100000 events, and duplicate IDs, unknown fields, unsupported versions, and invalid sequences are rejected. This API performs no file, database, network, or privileged operations. A user-facing replay command remains future work.
 
 ### FR-09 Operational behavior
 

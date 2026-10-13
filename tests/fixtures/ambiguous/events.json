@@ -1,0 +1,41 @@
+{
+  "fixture_schema_version": 1,
+  "events": [
+    {
+      "sequence": 1,
+      "event": {
+        "schema_version": 1,
+        "id": "failure-1",
+        "recorded_at_utc": "2026-10-13T00:00:00Z",
+        "source": "synthetic-probe",
+        "kind": {
+          "type": "probe_result",
+          "role": "external",
+          "target": "192.0.2.10:443",
+          "method": "tcp_connect",
+          "started_at_utc": "2026-10-13T00:00:00Z",
+          "elapsed_ms": 3000,
+          "outcome": { "type": "timeout" }
+        }
+      }
+    },
+    {
+      "sequence": 2,
+      "event": {
+        "schema_version": 1,
+        "id": "failure-2",
+        "recorded_at_utc": "2026-10-13T00:00:10Z",
+        "source": "synthetic-probe",
+        "kind": {
+          "type": "probe_result",
+          "role": "external",
+          "target": "192.0.2.10:443",
+          "method": "tcp_connect",
+          "started_at_utc": "2026-10-13T00:00:10Z",
+          "elapsed_ms": 3000,
+          "outcome": { "type": "timeout" }
+        }
+      }
+    }
+  ]
+}

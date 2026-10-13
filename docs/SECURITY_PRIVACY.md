@@ -13,6 +13,7 @@ The tool receives data from the local OS, active network probes, optional system
 - Foreground monitoring applies the same restrictions, requires two distinct external targets, runs them sequentially, and pauses at least one second after each round. Ctrl+C stops new attempts while the current attempt completes within its configured timeout.
 - Monitoring should not require root by default; optional privileged capabilities need explicit opt-in and a reason.
 - Do not silently upload diagnostics or enable telemetry. Work offline except for user-configured diagnostic probes.
+- The replay API parses in-memory JSON fixture input only, enforces a 16 MiB/100000-event limit, rejects unknown fields and unsupported schemas, and performs no networking or database writes.
 - The foreground monitor persists observations locally and emits them to stdout. The `incidents` command reads this history locally without modifying the database. No runtime telemetry or cloud sync is implemented.
 - Never automatically alter routes, DNS, firewall, drivers, or interface state.
 

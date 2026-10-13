@@ -1,6 +1,6 @@
 # Technical Architecture
 
-**Status:** Describes the implemented M1 CLI, Task 0005 event storage, Task 0006 pure incident lifecycle API, and intended future architecture. Implemented behavior is labeled below; other sections describe targets, not existing components.
+**Status:** Describes the implemented M1 CLI, Task 0005 event storage, Task 0006 incident lifecycle, Task 0007 history query, Task 0008 analysis API, Task 0009 fixture replay, and intended future architecture. Implemented behavior is labeled below; other sections describe targets, not existing components.
 
 ## 1. Logical flow
 
@@ -30,7 +30,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 - `incidents`: deterministic probe-target lifecycle over stored events (Task 0006) and read-only history CLI (Task 0007); derived-record persistence remains planned.
 - `analysis`: pure evidence-citing rules over current stored event types (Task 0008); CLI reports and additional event-source rules remain planned.
 - `report`: human/JSON exports (M3 onward).
-- `replay`: fixture ingestion into incident and analysis pipeline (M3 onward).
+- `replay`: strict bounded JSON fixture replay through incident and analysis APIs (Task 0009); CLI replay remains planned.
 
 **Implementation rule:** Keep one Cargo package and Rust modules. Extract crates only if justified by dependency separation or actual reuse. Do not scaffold unused modules.
 
@@ -128,6 +128,17 @@ a distinct external target to succeed without a qualifying failure in the same
 window. A backward timestamp anywhere in stored sequence disables timestamp
 correlations. DNS and unsupported evidence stay undetermined until matching
 observation types exist. The API adds no CLI, I/O, or diagnosis certainty.
+
+### Versioned fixture replay
+
+Task 0009's `replay::replay_json` accepts a strict envelope with
+`fixture_schema_version: 1` and an `events` array. Each item has a stored
+`sequence` and an event-v1 object. Sequence values must be strictly increasing;
+the replay parser does not sort or repair them. Fixture versioning is
+independent from event schema versioning. Parsing is bounded to 16 MiB and
+100000 events, rejects duplicate event IDs and unknown fields, then invokes the
+same incident and analysis APIs used elsewhere. The function accepts an
+in-memory string and performs no file, database, network, or privileged I/O.
 
 ## 6. Current event storage
 

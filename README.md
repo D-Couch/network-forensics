@@ -1,6 +1,6 @@
 # Network Forensics
 
-**Status:** Repository foundation, passive interface inventory, explicit one-shot TCP probes, foreground monitoring, bounded local event persistence, a deterministic probe-incident lifecycle core, read-only incident history, and a conservative analysis API are implemented.
+**Status:** Repository foundation, passive interface inventory, explicit one-shot TCP probes, foreground monitoring, bounded local event persistence, deterministic incident lifecycle and analysis APIs, read-only incident history, and offline fixture replay are implemented.
 
 Network Forensics is a Linux-first, privacy-conscious network diagnostic tool in early development. The current CLI inventories local interfaces, performs explicitly configured TCP connection probes, emits foreground observations, and displays incident history derived from stored probe events. Diagnostic explanations remain planned.
 
@@ -31,6 +31,8 @@ The incident lifecycle API analyzes stored/synthetic events without I/O. By defa
 
 The analysis API provides deterministic, evidence-cited findings using a 60-second correlation window. It can identify local-link-related evidence, failures at the caller-configured gateway-role target, failures across multiple external targets, or endpoint-specific evidence when a separate external target succeeds. It leaves other cases undetermined, cites event IDs, and states its limitations; it does not diagnose root causes. The API is not yet exposed as a CLI report. DNS-specific findings remain unavailable because DNS observations are not collected.
 
+The replay API accepts strict JSON fixtures with an independent fixture schema version, event insertion sequences, and versioned event objects. It runs the same lifecycle and analysis APIs without networking or database access. Input is limited to 16 MiB and 100,000 events; fixture cases and expected results live under `tests/fixtures/`. There is no user-facing replay command yet.
+
 The database is `$XDG_DATA_HOME/netforensics/events.sqlite3`, or
 `$HOME/.local/share/netforensics/events.sqlite3` when XDG_DATA_HOME is unset.
 On Unix, the application directory is owner-only (`0700`) and the database is
@@ -45,7 +47,6 @@ before deleting the database file to clear history.
 
 - DNS-specific probes and interface change tracking with selected counters.
 - Analysis and report CLI, JSON export, DNS observations, and additional evidence rules.
-- Replayable synthetic incidents for deterministic diagnosis tests.
 
 These are **planned features**, not currently implemented. The analysis rules are available only through a Rust API; derived incident persistence, DNS observations, and user-facing reports remain planned.
 

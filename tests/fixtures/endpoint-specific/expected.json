@@ -1,0 +1,4 @@
+{
+  "classifications": ["endpoint_specific_evidence"],
+  "evidence_event_ids": [["endpoint-a-fail-1", "endpoint-a-fail-2", "endpoint-b-success"]]
+}

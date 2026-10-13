@@ -1,0 +1,4 @@
+{
+  "classifications": ["local_link_related_evidence"],
+  "evidence_event_ids": [["external-fail-1", "external-fail-2", "carrier-down"]]
+}
