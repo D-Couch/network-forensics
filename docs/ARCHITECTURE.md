@@ -28,7 +28,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 - `monitor`: sequential round scheduling and cancellation (implemented); bounded fan-in remains a future reliability concern.
 - `storage`: SQLite persistence and migration (implemented in M2).
 - `incidents`: deterministic probe-target lifecycle over stored events (Task 0006) and read-only history CLI (Task 0007); derived-record persistence remains planned.
-- `analysis`: conservative rule engine (M3 onward).
+- `analysis`: pure evidence-citing rules over current stored event types (Task 0008); CLI reports and additional event-source rules remain planned.
 - `report`: human/JSON exports (M3 onward).
 - `replay`: fixture ingestion into incident and analysis pipeline (M3 onward).
 
@@ -114,6 +114,20 @@ Planned variants include `dns_result`, `link_speed_changed`,
 Task 0006 implements `incidents::analyze_events`, a pure Rust API over stored events. It groups by exact `(probe role, numeric IP:port)` and opens an incident after two consecutive timeouts, network-unreachable, or host-unreachable outcomes within 30 seconds. Two consecutive successful TCP connects recover it. Refused, ambiguous, unsupported, or blocked outcomes break streaks and do not qualify. Counts, failure window, and maximum observation gap are configurable with validation; defaults are two failures, two successes, 30 seconds, and 60 seconds.
 
 Stored insertion sequence defines order. A forward timestamp gap beyond the configured maximum or a backward timestamp resets pending streaks and marks an already-open incident with the corresponding uncertainty flag. Neither is evidence of continuous downtime. Incident IDs derive from the first stored sequence, and results retain failure/recovery event IDs. The `incidents` CLI reads event pages in sequence order from the existing database and passes the full retained history through the pure engine; it opens the database read-only and does not create or migrate it. It performs no network activity or diagnosis. Derived records remain unpersisted and are recomputed for each query.
+
+### Conservative analysis API
+
+Task 0008 adds `analysis::analyze_incidents`, a pure function over ordered
+stored events and lifecycle incidents. It returns one finding per incident with
+a classification, explanation, evidence IDs, limitations, and follow-up check.
+Its validated correlation window defaults to 60 seconds. Carrier-down evidence
+is described as local-link-related without claiming that the interface carried
+the probe path. Caller-provided gateway roles remain labels. Multiple external
+target failures do not prove a shared cause; endpoint-specific evidence requires
+a distinct external target to succeed without a qualifying failure in the same
+window. A backward timestamp anywhere in stored sequence disables timestamp
+correlations. DNS and unsupported evidence stay undetermined until matching
+observation types exist. The API adds no CLI, I/O, or diagnosis certainty.
 
 ## 6. Current event storage
 

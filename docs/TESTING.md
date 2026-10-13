@@ -44,6 +44,12 @@ empty history, rendered evidence and status, continuation across event-page
 boundaries, missing-database behavior, and that read-only access cannot write
 or alter the schema. They must not open the default user database.
 
+Analysis tests use synthetic ordered event streams and lifecycle incidents.
+They cover carrier-down evidence, caller-supplied gateway roles, endpoint
+specificity with an independent successful target, multiple external failures,
+stale evidence, backward timestamps, schema/sequence validation, and explicit
+undetermined limitations. They must not access the network or default database.
+
 The routine test suite must remain deterministic and must not invoke live probe
 targets. Manual interface inventory can read the host's sysfs/procfs and is
 environment-dependent; it is not a substitute for the fixture-based unit tests.

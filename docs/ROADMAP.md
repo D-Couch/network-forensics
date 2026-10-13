@@ -25,8 +25,9 @@ events, without persisting derived incident records.
 
 ## M3 — Explainable diagnosis and replay
 
-- Define rules and evidence-citation format for local link, gateway/LAN, DNS, upstream path, endpoint-only, undetermined.
-- Reuse analysis engine for live/stored observations and synthetic fixtures.
+- [x] **Task 0008 — Conservative analysis core:** deterministic evidence-citing Rust API over current probe and carrier observations; unsupported cases remain undetermined.
+- Add DNS observations and carefully scoped rules for local link, gateway/LAN, DNS, upstream path, endpoint-only, and undetermined cases.
+- Add deterministic versioned-fixture replay through the same analysis engine.
 - Support `analyze --latest`, human-readable and sanitized JSON `report --latest`.
 - Test false-positive avoidance, uncertainty, source availability, timestamp ordering, and ambiguous signals.
 

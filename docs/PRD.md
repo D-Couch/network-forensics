@@ -54,7 +54,7 @@ The Task 0006 pure Rust lifecycle API groups stored probe events by exact role a
 
 ### FR-06 Diagnosis
 
-Classify cautiously into broad fault domains: local link/interface, local gateway/LAN, DNS-specific, upstream/external path, endpoint-specific, and undetermined. Each finding must include evidence IDs, explanatory text, uncertainty/limitations, and suggested follow-up checks. Prefer deterministic rules; no required ML/LLM service.
+Task 0008 provides a pure deterministic analysis API over currently stored TCP probe and carrier observations. It can return local-link-related evidence, configured gateway-role target failure, multiple external targets failed, endpoint-specific evidence supported by another successful external target, or undetermined. Findings cite event IDs and include explanatory text, limitations, and a follow-up check. The 60-second correlation window is skipped when timestamps move backwards. DNS-specific findings remain undetermined until DNS observations exist. These labels describe evidence and do not establish root causes; analysis CLI and report/export remain future work. No ML/LLM service is required.
 
 ### FR-07 Persistence and export
 

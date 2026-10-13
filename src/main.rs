@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod event;
 pub mod incidents;
 pub mod interfaces;
