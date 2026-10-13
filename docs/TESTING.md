@@ -7,7 +7,7 @@
 - System-dependent/live tests are optional and clearly marked; CI must not assume network reachability.
 - Record expected evidence, classifications, and explicit uncertainty for every simulated incident.
 
-## Routine checks after Task 0001
+## Routine checks for the current Cargo package
 
 ```bash
 cargo fmt --check
@@ -16,7 +16,7 @@ cargo clippy -- -D warnings
 cargo build
 ```
 
-The commands should be executed where available; failures and missing tools must be reported verbatim. No tests are claimed to have run before code exists.
+Run these checks after relevant changes; failures and missing tools must be reported accurately. Task 0001 is complete, and the package now also includes interface, probe, and monitor behavior.
 
 The current probe tests inject both transport outcomes and clock readings. They
 must remain network-independent; do not add live endpoint checks to the routine
@@ -25,6 +25,16 @@ test suite.
 The monitor's round tests use fake transport and clock implementations and
 validate the newline-delimited event output. Signal and CLI target validation
 should be tested without invoking a real network connection.
+
+The event store tests use in-memory SQLite or temporary files. They cover
+schema migration and rejection, durable reopen and sequence paging, atomic
+rollback, age/count retention, path validation, Unix permissions, and symlink
+refusal. Tests must not open the default user database or rely on environment
+paths.
+
+The routine test suite must remain deterministic and must not invoke live probe
+targets. Manual interface inventory can read the host's sysfs/procfs and is
+environment-dependent; it is not a substitute for the fixture-based unit tests.
 
 ## Test layers
 

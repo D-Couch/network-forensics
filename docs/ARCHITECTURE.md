@@ -1,38 +1,38 @@
 # Technical Architecture
 
-**Status:** Proposed boundaries and contracts; implementation choices should be validated incrementally.
+**Status:** Describes the implemented M1 CLI and the intended future architecture. Implemented behavior is labeled below; other sections describe targets, not existing components.
 
 ## 1. Logical flow
 
 ```text
-[Linux interface observer] ----\
-[Active probe runner] ----------> [Normalized observation events] --> [bounded channel]
-[Optional journal observer] ----/                                      |
-                                                                      +--> [local event store]
-                                                                      +--> [incident detector]
-                                                                                 |
-                                                                        [diagnostic rules]
-                                                                                 |
-                                                                      [report/export CLI]
-[Versioned replay fixtures] ----------------> [same incident detector and diagnostic rules]
+Current:
+[Linux interface observer] --\
+                              +--> [cycle events] --> [SQLite] --> [JSON Lines stdout]
+[Explicit TCP probe runner] -/
+
+Target:
+[Observation events] --> [local event store] --> [incident detector]
+                                                   --> [diagnostic rules]
+                                                   --> [report/export CLI]
+[Versioned replay fixtures] ----------------------> [same analysis pipeline]
 ```
 
 The collectors emit *observations*, not conclusions. The incident detector correlates events and produces incident boundaries; the separate rule engine evaluates possible fault domains. The storage layer should not dictate diagnostic rules.
 
 ## 2. Modules (logical, not mandatory crates)
 
-- `cli`: command parsing and user-facing output.
-- `model`: typed, versioned observations and analysis output.
-- `collectors`: Linux interface state/metrics and optional logs.
-- `probes`: active reachability and DNS checks.
-- `monitor`: scheduling, cancellation, lifecycle, and bounded fan-in.
-- `storage`: SQLite persistence and migration (M2 onward).
+- `main.rs`: current command parsing and user-facing output.
+- `event`: typed, versioned observation events (implemented).
+- `interfaces`: Linux interface state and default-route discovery (implemented).
+- `probes`: explicit TCP reachability checks (implemented); DNS checks remain planned.
+- `monitor`: sequential round scheduling and cancellation (implemented); bounded fan-in remains a future reliability concern.
+- `storage`: SQLite persistence and migration (implemented in M2).
 - `incidents`: incident lifecycle and event correlation (M2 onward).
 - `analysis`: conservative rule engine (M3 onward).
 - `report`: human/JSON exports (M3 onward).
 - `replay`: fixture ingestion into incident and analysis pipeline (M3 onward).
 
-**Implementation rule:** Begin with one Cargo package and Rust modules. Extract crates only if justified by dependency separation or actual reuse. Do not scaffold unused modules on Task 0001.
+**Implementation rule:** Keep one Cargo package and Rust modules. Extract crates only if justified by dependency separation or actual reuse. Do not scaffold unused modules.
 
 ### Current interface discovery
 
@@ -59,7 +59,8 @@ verified network location.
 
 The monitor requires two distinct, explicit external IP:port targets and
 accepts one optional gateway target. It emits JSON Lines interface snapshots
-and probe events to stdout without persistence. Targets run sequentially; a
+and probe events to stdout and commits each complete event cycle to the local
+SQLite store before printing it. Targets run sequentially; a
 completed round is followed by a configurable pause (10 seconds by default,
 bounded to 1 second–1 hour). Ctrl+C prevents starting additional probes and
 allows the current bounded connect attempt to finish. The `ctrlc` dependency
@@ -67,12 +68,13 @@ provides portable signal handling; the monitor creates no background service.
 
 ## 3. Event envelope v1
 
-Use a serde-compatible Rust structure with fields equivalent to:
+The implemented schema-v1 envelope uses a serde-compatible Rust structure with
+fields equivalent to:
 
 ```json
 {
   "schema_version": 1,
-  "id": "uuid-or-equivalent-unique-id",
+  "id": "event-1",
   "recorded_at_utc": "2026-01-01T00:00:00Z",
   "source": "interface",
   "kind": {
@@ -83,9 +85,14 @@ Use a serde-compatible Rust structure with fields equivalent to:
 }
 ```
 
-This JSON is a **conceptual contract**, not an instruction to add a UUID dependency or enforce this precise discriminator syntax in Task 0001. For Task 0001 define one typed variant and a stable serializable envelope with schema version; decide and test the serialized representation explicitly.
+This JSON illustrates the implemented `link_state_changed` shape. The event enum
+also includes `probe_result` and `interface_snapshot`; these variants are
+implemented and tested. IDs are caller-assigned and must be unique within the
+caller's event collection. Deserialization rejects unsupported schema versions
+and unknown fields.
 
-Future variants: `probe_result`, `dns_result`, `interface_snapshot`, `link_state_changed`, `link_speed_changed`, `interface_counter_delta`, `journal_signal`, `monitoring_gap`.
+Planned variants include `dns_result`, `link_speed_changed`,
+`interface_counter_delta`, `journal_signal`, and `monitoring_gap`.
 
 - Every event identifies provenance/source and observation time.
 - IDs allow reports to cite specific evidence. Stable unique IDs may be generated by the ingestion layer, not each collector.
@@ -106,9 +113,30 @@ Future variants: `probe_result`, `dns_result`, `interface_snapshot`, `link_state
 
 Define a temporal window and clear hysteresis/debounce behavior in M2. Multiple intermittent failures within the window may belong to one incident; long observation gaps do not count as continuous downtime. Incidents may remain open when recovery is not observed. Preserve raw observations after classification and allow re-analysis with a different rules version.
 
-## 6. Storage
+## 6. Current event storage
 
-SQLite starts M2. Use transactional writes, indexed timestamps and incident IDs, explicit migrations, a documented per-user database location, and retention/size controls. Persist event schema/rule engine versions; report storage failures. Avoid holding unbounded data in RAM during prolonged disk failures.
+Task 0005 implements a local SQLite event store. Its database is
+`$XDG_DATA_HOME/netforensics/events.sqlite3`, or
+`$HOME/.local/share/netforensics/events.sqlite3` when XDG_DATA_HOME is unset.
+The schema is tracked with `PRAGMA user_version`; migration to schema v1 is
+transactional, and unknown versions are rejected. Each row stores insertion
+sequence, event ID, event schema version, UTC timestamp and Unix milliseconds,
+source, kind, and the full serialized versioned event. Timestamp and kind/time
+indexes support later filtering; sequence is the stable pagination order.
+
+Each monitor cycle is committed in one immediate transaction. Age and count
+retention run in the same transaction. Defaults are 30 days and 100000 events;
+the database limit is 256 MiB. Configuration ranges and limits are described
+in the README and enforced by the CLI/storage API. Reads are paged by sequence,
+up to 1000 events per request. Write batches are capped at 4096 events. Storage
+failures stop the monitor before that cycle is emitted to stdout; the
+in-memory cycle is bounded to the visible interfaces and configured probes.
+Database writes are synchronous in the foreground monitor, so slow storage can
+delay later sampling; a bounded asynchronous writer is future reliability work.
+
+See [ADR 0001](decisions/0001-local-event-storage.md) for the payload/index
+trade-off and dependency choice. Incident tables and incident grouping are not
+implemented yet.
 
 ## 7. Permissions and deployment
 

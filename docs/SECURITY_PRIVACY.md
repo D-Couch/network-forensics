@@ -13,6 +13,7 @@ The tool receives data from the local OS, active network probes, optional system
 - Foreground monitoring applies the same restrictions, requires two distinct external targets, runs them sequentially, and pauses at least one second after each round. Ctrl+C stops new attempts while the current attempt completes within its configured timeout.
 - Monitoring should not require root by default; optional privileged capabilities need explicit opt-in and a reason.
 - Do not silently upload diagnostics or enable telemetry. Work offline except for user-configured diagnostic probes.
+- The current foreground monitor emits observations to stdout and does not persist event history. No runtime telemetry or cloud sync is implemented.
 - Never automatically alter routes, DNS, firewall, drivers, or interface state.
 
 ## Sensitive fields and exports
@@ -21,7 +22,7 @@ IPs (especially public IPs), local subnets, interface names, MACs, SSIDs, hostna
 
 ## Retention and storage
 
-SQLite stays local, using secure per-user paths/permissions. Specify retention and maximum-size controls during M2. Document how to stop collection and delete history; avoid collecting indefinitely in uncontrolled storage. Never silently sync the database.
+SQLite event storage is implemented for monitor observations. It stays at the per-user XDG data location or `$HOME/.local/share/netforensics/events.sqlite3`, is never synced by the application, and uses `0700` directory and `0600` database permissions on Unix. Retention defaults to 30 days or 100000 events, whichever limit is reached first, with a 256 MiB database cap. Stop the monitor and delete `events.sqlite3` to clear stored history. The database contains identifying network metadata such as IP addresses and interface names; handle it as private local data.
 
 ## Reliability and misuse prevention
 

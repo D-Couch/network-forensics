@@ -1,7 +1,7 @@
 # Product Requirements Document (PRD)
 
 **Project:** Network Forensics (`netforensics`)  
-**Status:** Proposed, pre-implementation  
+**Status:** Product target; implementation is partial (see `README.md` and `ROADMAP.md`).
 **Initial platform:** Linux  
 **Primary interface:** command-line interface (CLI)
 
@@ -34,7 +34,7 @@ Record relevant, timestamped observations; assemble them into coherent incidents
 
 ### FR-01 CLI and configuration
 
-Provide `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, `report --latest`. These commands are a *target interface*; only help/version are required in Task 0001. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
+The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, and `report --latest`. The current implementation provides help/version, `interfaces`, one-shot `probe`, and foreground `monitor`; `status`, `incidents`, `analyze`, and `report` remain planned. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
 
 ### FR-02 Probe observation
 
@@ -58,7 +58,7 @@ Classify cautiously into broad fault domains: local link/interface, local gatewa
 
 ### FR-07 Persistence and export
 
-Persist records locally in SQLite, with schema migration strategy, retention options, and explicit handling of write failures. Export machine-readable JSON and readable incident reports. Sanitization/redaction is on by default for shared reports; avoid including raw IPs, hostnames, MACs, paths, SSIDs, or usernames unless a user explicitly opts in.
+Persist records locally in SQLite, with schema migration strategy, retention options, and explicit handling of write failures. The current implementation persists versioned observation events with indexed metadata and bounded retention; incident persistence and query commands remain future work. Export machine-readable JSON and readable incident reports. Sanitization/redaction is on by default for shared reports; avoid including raw IPs, hostnames, MACs, paths, SSIDs, or usernames unless a user explicitly opts in.
 
 ### FR-08 Replay
 
@@ -101,4 +101,6 @@ Gracefully handle SIGINT/shutdown; bound memory and queues; persist without bloc
 
 ## 10. Open decisions, explicitly deferred
 
-Exact probe destinations and rates, retention defaults, interface-selection edge cases, Linux API/library choices, binary packaging, open-source license, and incident-threshold constants are to be proposed during their respective milestones and recorded before implementation. Never assume public endpoints are guaranteed responsive or universally reachable.
+Exact probe destinations and rates, interface-selection edge cases, incident-threshold constants, binary packaging, and open-source license are to be proposed during their respective milestones and recorded before implementation. Event-storage location, retention defaults, and SQLite schema v1 are decided in Task 0005 and `docs/decisions/0001-local-event-storage.md`. Never assume public endpoints are guaranteed responsive or universally reachable.
+
+The repository is already public on GitHub but has no license file. Public visibility does not grant reuse rights; licensing remains an open release decision and should be resolved before inviting external reuse or contributions.

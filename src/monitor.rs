@@ -5,6 +5,7 @@ use crate::interfaces::{self, Discovery};
 use crate::probes::{
     ProbeClock, ProbeConfig, ProbeRunner, ProbeTarget, ProbeTransport, SystemClock, SystemTransport,
 };
+use crate::storage::{EventStore, RetentionPolicy};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 use std::io::{self, BufWriter, Write};
@@ -23,6 +24,7 @@ pub struct MonitorConfig {
     pub interval: Duration,
     pub probe: ProbeConfig,
     pub targets: Vec<ProbeTarget>,
+    pub retention: RetentionPolicy,
 }
 
 impl MonitorConfig {
@@ -30,6 +32,20 @@ impl MonitorConfig {
         interval_millis: u64,
         timeout_millis: u64,
         targets: Vec<ProbeTarget>,
+    ) -> Result<Self, &'static str> {
+        Self::with_retention(
+            interval_millis,
+            timeout_millis,
+            targets,
+            RetentionPolicy::default(),
+        )
+    }
+
+    pub fn with_retention(
+        interval_millis: u64,
+        timeout_millis: u64,
+        targets: Vec<ProbeTarget>,
+        retention: RetentionPolicy,
     ) -> Result<Self, &'static str> {
         if !(MIN_INTERVAL_MILLIS..=MAX_INTERVAL_MILLIS).contains(&interval_millis) {
             return Err("interval must be between 1000 and 3600000 milliseconds");
@@ -72,27 +88,27 @@ impl MonitorConfig {
             interval: Duration::from_millis(interval_millis),
             probe: ProbeConfig::from_millis(timeout_millis)?,
             targets,
+            retention,
         })
     }
 }
 
-/// Emits one newline-delimited JSON event for every interface snapshot and
-/// configured probe. The stop flag is checked before each new probe.
-pub fn emit_cycle<T, C, W, F>(
+/// Collects one interface snapshot and each configured probe event. The stop
+/// flag is checked before each new probe.
+pub fn collect_cycle<T, C, F>(
     discovery: &Discovery,
     config: &MonitorConfig,
     runner: &mut ProbeRunner<T, C>,
     stop: &AtomicBool,
     cycle_time: DateTime<Utc>,
-    writer: &mut W,
     mut next_id: F,
-) -> io::Result<()>
+) -> Vec<Event>
 where
     T: ProbeTransport,
     C: ProbeClock,
-    W: Write,
     F: FnMut() -> String,
 {
+    let mut events = Vec::with_capacity(discovery.interfaces.len() + config.targets.len());
     for interface in &discovery.interfaces {
         let event = Event {
             schema_version: crate::event::SCHEMA_VERSION,
@@ -110,17 +126,16 @@ where
                     .map(|route| route == &interface.name),
             },
         };
-        write_event(writer, &event)?;
+        events.push(event);
     }
 
     for target in &config.targets {
         if stop.load(Ordering::Acquire) {
             break;
         }
-        let event = runner.run(next_id(), *target, config.probe);
-        write_event(writer, &event)?;
+        events.push(runner.run(next_id(), *target, config.probe));
     }
-    Ok(())
+    events
 }
 
 fn write_event<W: Write>(writer: &mut W, event: &Event) -> io::Result<()> {
@@ -128,9 +143,22 @@ fn write_event<W: Write>(writer: &mut W, event: &Event) -> io::Result<()> {
     writeln!(writer, "{serialized}")
 }
 
+fn persist_then_write<W: Write>(
+    store: &mut EventStore,
+    events: &[Event],
+    writer: &mut W,
+) -> io::Result<()> {
+    store.store_events(events).map_err(io::Error::other)?;
+    for event in events {
+        write_event(writer, event)?;
+    }
+    Ok(())
+}
+
 /// Runs until Ctrl+C. A currently active TCP connect is allowed to finish or
 /// time out before shutdown; no new probes start after the signal is observed.
 pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
+    let mut store = EventStore::open_default(config.retention).map_err(io::Error::other)?;
     let stop = Arc::new(AtomicBool::new(false));
     let signal_stop = Arc::clone(&stop);
     ctrlc::set_handler(move || signal_stop.store(true, Ordering::Release))
@@ -152,15 +180,15 @@ pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
             }
         };
         let cycle_time = DateTime::<Utc>::from(SystemTime::now());
-        emit_cycle(
+        let events = collect_cycle(
             &discovery,
             &config,
             &mut runner,
             &stop,
             cycle_time,
-            &mut writer,
             crate::next_event_id,
-        )?;
+        );
+        persist_then_write(&mut store, &events, &mut writer)?;
         writer.flush()?;
         if !stop.load(Ordering::Acquire) {
             wait_interval(config.interval, &stop);
@@ -285,25 +313,27 @@ mod tests {
         );
         let stop = AtomicBool::new(false);
         let mut ids = 0;
-        let mut output = Vec::new();
-        emit_cycle(
+        let config = MonitorConfig::new(
+            DEFAULT_INTERVAL_MILLIS,
+            crate::probes::DEFAULT_TIMEOUT_MILLIS,
+            vec![target("192.0.2.1"), target("192.0.2.2")],
+        )
+        .unwrap();
+        let events = collect_cycle(
             &discovery(),
-            &MonitorConfig::new(
-                DEFAULT_INTERVAL_MILLIS,
-                crate::probes::DEFAULT_TIMEOUT_MILLIS,
-                vec![target("192.0.2.1"), target("192.0.2.2")],
-            )
-            .unwrap(),
+            &config,
             &mut runner,
             &stop,
             "2026-10-13T00:00:00Z".parse().unwrap(),
-            &mut output,
             || {
                 ids += 1;
                 format!("test-{ids}")
             },
-        )
-        .unwrap();
+        );
+        let mut output = Vec::new();
+        for event in &events {
+            write_event(&mut output, event).unwrap();
+        }
         let lines: Vec<_> = std::str::from_utf8(&output).unwrap().lines().collect();
         assert_eq!(lines.len(), 3);
         let events: Vec<_> = lines
@@ -330,6 +360,35 @@ mod tests {
             }
         ));
         assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn cycle_is_not_emitted_when_storage_transaction_fails() {
+        let mut store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
+        let existing = test_event("duplicate");
+        store.store_events(&[existing.clone()]).unwrap();
+        let events = [existing.clone(), existing];
+        let mut output = Vec::new();
+
+        assert!(persist_then_write(&mut store, &events, &mut output).is_err());
+        assert!(output.is_empty());
+        assert_eq!(store.event_count().unwrap(), 1);
+    }
+
+    fn test_event(id: &str) -> Event {
+        Event {
+            schema_version: crate::event::SCHEMA_VERSION,
+            id: id.to_owned(),
+            recorded_at_utc: "2026-10-13T00:00:00Z".parse().unwrap(),
+            source: "interface".to_owned(),
+            kind: EventKind::InterfaceSnapshot {
+                interface: "test0".to_owned(),
+                operational_state: "up".to_owned(),
+                carrier: Some(true),
+                speed_mbps: Some(1000),
+                is_default_route: Some(true),
+            },
+        }
     }
 
     #[test]

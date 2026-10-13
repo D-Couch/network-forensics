@@ -2,18 +2,20 @@ pub mod event;
 pub mod interfaces;
 pub mod monitor;
 pub mod probes;
+pub mod storage;
 
 use crate::event::{
     Event, EventKind, ProbeFailureCategory, ProbeLimitationCategory, ProbeOutcome, ProbeRole,
 };
 use crate::monitor::{MonitorConfig, DEFAULT_INTERVAL_MILLIS};
 use crate::probes::{ProbeConfig, ProbeRunner, ProbeTarget, SystemClock, SystemTransport};
+use crate::storage::{RetentionPolicy, DEFAULT_MAX_EVENTS, DEFAULT_RETENTION_DAYS};
 use std::env;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, and foreground monitoring are available; persistence and analysis are planned.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS]\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit interface and probe observations until Ctrl+C\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. All probe targets must be numeric IP addresses; no DNS lookup is performed.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, and foreground monitoring are available; incident analysis is planned.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All probe targets must be numeric IP addresses; no DNS lookup is performed.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -72,6 +74,8 @@ fn main() {
 fn parse_monitor_args(args: &[String]) -> Result<MonitorConfig, String> {
     let mut interval_millis = DEFAULT_INTERVAL_MILLIS;
     let mut timeout_millis = probes::DEFAULT_TIMEOUT_MILLIS;
+    let mut retention_days = DEFAULT_RETENTION_DAYS;
+    let mut max_events = DEFAULT_MAX_EVENTS;
     let mut targets = Vec::new();
     let mut index = 0;
     while index < args.len() {
@@ -90,13 +94,26 @@ fn parse_monitor_args(args: &[String]) -> Result<MonitorConfig, String> {
                     .parse()
                     .map_err(|_| "timeout must be an integer in milliseconds".to_owned())?;
             }
+            "--retention-days" => {
+                retention_days = value
+                    .parse()
+                    .map_err(|_| "retention days must be an integer".to_owned())?;
+            }
+            "--max-events" => {
+                max_events = value
+                    .parse()
+                    .map_err(|_| "maximum events must be an integer".to_owned())?;
+            }
             "--gateway" => targets.push(parse_probe_target("gateway", value)?),
             "--external" => targets.push(parse_probe_target("external", value)?),
             _ => return Err(format!("unknown option {option}")),
         }
         index += 2;
     }
-    MonitorConfig::new(interval_millis, timeout_millis, targets).map_err(str::to_owned)
+    let retention =
+        RetentionPolicy::new(retention_days, max_events).map_err(|error| error.to_string())?;
+    MonitorConfig::with_retention(interval_millis, timeout_millis, targets, retention)
+        .map_err(str::to_owned)
 }
 
 fn run_probe(role: &str, target: &str, timeout: Option<&String>) {
@@ -257,6 +274,36 @@ mod tests {
             "192.0.2.1:443".to_owned(),
         ];
         assert!(parse_monitor_args(&repeated).is_err());
+    }
+
+    #[test]
+    fn monitor_parser_accepts_and_validates_retention_options() {
+        let args = [
+            "--external".to_owned(),
+            "192.0.2.1:443".to_owned(),
+            "--external".to_owned(),
+            "192.0.2.2:443".to_owned(),
+            "--retention-days".to_owned(),
+            "7".to_owned(),
+            "--max-events".to_owned(),
+            "500".to_owned(),
+        ];
+        let config = parse_monitor_args(&args).unwrap();
+        assert_eq!(config.retention.retention_days(), 7);
+        assert_eq!(config.retention.max_events(), 500);
+
+        for invalid in ["0", "3651", "abc"] {
+            let mut args = args.to_vec();
+            let index = args.iter().position(|value| value == "7").unwrap();
+            args[index] = invalid.to_owned();
+            assert!(parse_monitor_args(&args).is_err());
+        }
+        for invalid in ["0", "1000001", "abc"] {
+            let mut args = args.to_vec();
+            let index = args.iter().position(|value| value == "500").unwrap();
+            args[index] = invalid.to_owned();
+            assert!(parse_monitor_args(&args).is_err());
+        }
     }
 }
 
