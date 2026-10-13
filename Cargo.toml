@@ -8,4 +8,4 @@ description = "A local network diagnostics tool"
 chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
+ctrlc = "3"

@@ -22,6 +22,10 @@ The current probe tests inject both transport outcomes and clock readings. They
 must remain network-independent; do not add live endpoint checks to the routine
 test suite.
 
+The monitor's round tests use fake transport and clock implementations and
+validate the newline-delimited event output. Signal and CLI target validation
+should be tested without invoking a real network connection.
+
 ## Test layers
 
 1. **Model and schema:** round-trip serialization, version enforcement, malformed input, invalid/unknown fields policy, unknown-versus-false semantics.

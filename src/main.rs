@@ -1,17 +1,19 @@
 pub mod event;
 pub mod interfaces;
+pub mod monitor;
 pub mod probes;
 
 use crate::event::{
     Event, EventKind, ProbeFailureCategory, ProbeLimitationCategory, ProbeOutcome, ProbeRole,
 };
+use crate::monitor::{MonitorConfig, DEFAULT_INTERVAL_MILLIS};
 use crate::probes::{ProbeConfig, ProbeRunner, ProbeTarget, SystemClock, SystemTransport};
 use std::env;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory and explicit one-shot TCP probes are available; background monitoring and analysis are planned.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Probe targets must be numeric IP addresses; no DNS lookup is performed.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, and foreground monitoring are available; persistence and analysis are planned.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS]\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit interface and probe observations until Ctrl+C\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. All probe targets must be numeric IP addresses; no DNS lookup is performed.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -28,17 +30,73 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        [command, flag] if command == "probe" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
+        }
         [command, role, target] if command == "probe" => {
             run_probe(role, target, None);
         }
         [command, role, target, timeout] if command == "probe" => {
             run_probe(role, target, Some(timeout));
         }
+        [command, flag] if command == "monitor" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
+        }
+        [command, rest @ ..] if command == "monitor" => {
+            let config = match parse_monitor_args(rest) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("Invalid monitor configuration: {error}\n\n{HELP}");
+                    std::process::exit(2);
+                }
+            };
+            if !config
+                .targets
+                .iter()
+                .any(|target| target.role == ProbeRole::Gateway)
+            {
+                eprintln!("No gateway probe target configured; interface observations will still be collected.");
+            }
+            if let Err(error) = monitor::run_foreground(config) {
+                eprintln!("Monitoring stopped with an error: {error}");
+                std::process::exit(1);
+            }
+        }
         _ => {
             eprintln!("Unknown or unsupported command or argument.\n\n{HELP}");
             std::process::exit(2);
         }
     }
+}
+
+fn parse_monitor_args(args: &[String]) -> Result<MonitorConfig, String> {
+    let mut interval_millis = DEFAULT_INTERVAL_MILLIS;
+    let mut timeout_millis = probes::DEFAULT_TIMEOUT_MILLIS;
+    let mut targets = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let option = args[index].as_str();
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| format!("missing value for {option}"))?;
+        match option {
+            "--interval-ms" => {
+                interval_millis = value
+                    .parse()
+                    .map_err(|_| "interval must be an integer in milliseconds".to_owned())?;
+            }
+            "--timeout-ms" => {
+                timeout_millis = value
+                    .parse()
+                    .map_err(|_| "timeout must be an integer in milliseconds".to_owned())?;
+            }
+            "--gateway" => targets.push(parse_probe_target("gateway", value)?),
+            "--external" => targets.push(parse_probe_target("external", value)?),
+            _ => return Err(format!("unknown option {option}")),
+        }
+        index += 2;
+    }
+    MonitorConfig::new(interval_millis, timeout_millis, targets).map_err(str::to_owned)
 }
 
 fn run_probe(role: &str, target: &str, timeout: Option<&String>) {
@@ -125,7 +183,7 @@ fn limitation_name(category: ProbeLimitationCategory) -> &'static str {
     }
 }
 
-fn next_event_id() -> String {
+pub(crate) fn next_event_id() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let epoch_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -174,6 +232,31 @@ mod tests {
         assert!(parse_probe_config(Some("abc")).is_err());
         assert!(parse_probe_config(Some("0")).is_err());
         assert!(parse_probe_config(Some("30001")).is_err());
+    }
+
+    #[test]
+    fn monitor_parser_requires_distinct_explicit_external_targets() {
+        let args = [
+            "--external".to_owned(),
+            "192.0.2.1:443".to_owned(),
+            "--external".to_owned(),
+            "192.0.2.2:443".to_owned(),
+            "--interval-ms".to_owned(),
+            "5000".to_owned(),
+        ];
+        let config = parse_monitor_args(&args).unwrap();
+        assert_eq!(config.interval, std::time::Duration::from_millis(5000));
+        assert_eq!(config.targets.len(), 2);
+
+        let one_target = args[..2].to_vec();
+        assert!(parse_monitor_args(&one_target).is_err());
+        let repeated = [
+            "--external".to_owned(),
+            "192.0.2.1:443".to_owned(),
+            "--external".to_owned(),
+            "192.0.2.1:443".to_owned(),
+        ];
+        assert!(parse_monitor_args(&repeated).is_err());
     }
 }
 

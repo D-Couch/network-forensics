@@ -55,6 +55,16 @@ endpoint and port; it is not a general Internet reachability conclusion. The
 gateway/external role is caller-provided metadata, not an independently
 verified network location.
 
+### Current foreground monitor
+
+The monitor requires two distinct, explicit external IP:port targets and
+accepts one optional gateway target. It emits JSON Lines interface snapshots
+and probe events to stdout without persistence. Targets run sequentially; a
+completed round is followed by a configurable pause (10 seconds by default,
+bounded to 1 second–1 hour). Ctrl+C prevents starting additional probes and
+allows the current bounded connect attempt to finish. The `ctrlc` dependency
+provides portable signal handling; the monitor creates no background service.
+
 ## 3. Event envelope v1
 
 Use a serde-compatible Rust structure with fields equivalent to:

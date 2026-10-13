@@ -20,6 +20,13 @@ pub enum EventKind {
         elapsed_ms: u64,
         outcome: ProbeOutcome,
     },
+    InterfaceSnapshot {
+        interface: String,
+        operational_state: String,
+        carrier: Option<bool>,
+        speed_mbps: Option<u64>,
+        is_default_route: Option<bool>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +199,27 @@ mod tests {
         assert!(json.contains("\"type\": \"probe_result\""));
         assert!(json.contains("\"role\": \"external\""));
         assert!(json.contains("\"target\": \"203.0.113.8:443\""));
+        assert_eq!(Event::from_json(&json).unwrap(), event);
+    }
+
+    #[test]
+    fn interface_snapshot_keeps_unknown_values_explicit() {
+        let event = Event {
+            schema_version: SCHEMA_VERSION,
+            id: "interface-1".into(),
+            recorded_at_utc: "2026-01-01T00:00:00Z".parse().unwrap(),
+            source: "interface".into(),
+            kind: EventKind::InterfaceSnapshot {
+                interface: "test0".into(),
+                operational_state: "unknown".into(),
+                carrier: None,
+                speed_mbps: None,
+                is_default_route: None,
+            },
+        };
+        let json = event.to_json().unwrap();
+        assert!(json.contains("\"type\": \"interface_snapshot\""));
+        assert!(json.contains("\"carrier\": null"));
         assert_eq!(Event::from_json(&json).unwrap(), event);
     }
 }

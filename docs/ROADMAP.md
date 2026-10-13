@@ -4,10 +4,10 @@ Milestones are sequential targets, not commitments to ship all features immediat
 
 ## M1 — CLI and live observation
 
-- **Task 0001 — Repository foundation:** Cargo package, help/version, one serializable versioned event envelope, tests, formatting/lint/build. No live network work.
-- Task 0002 — Interface discovery/state: select interface/default route where possible; report unavailable fields clearly.
-- Task 0003 — Probe runner: configured local/external probes, bounded timeouts, explicit result categories, injectable clock/transports for tests.
-- Task 0004 — Foreground monitor: periodic scheduling, CLI status output, graceful cancellation, structured observation output.
+- [x] **Task 0001 — Repository foundation:** Cargo package, help/version, one serializable versioned event envelope, tests, formatting/lint/build. No live network work.
+- [x] Task 0002 — Interface discovery/state: select interface/default route where possible; report unavailable fields clearly.
+- [x] Task 0003 — Probe runner: configured local/external probes, bounded timeouts, explicit result categories, injectable clock/transports for tests.
+- [x] Task 0004 — Foreground monitor: periodic scheduling, CLI status output, graceful cancellation, structured observation output.
 
 **M1 exit:** A user can run monitoring and view observed state/probe results. No claim of root-cause diagnosis.
 

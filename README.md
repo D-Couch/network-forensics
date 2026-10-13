@@ -1,6 +1,6 @@
 # Network Forensics
 
-**Status:** Repository foundation, passive interface inventory, and explicit one-shot TCP probes are implemented; background monitoring and analysis remain planned.
+**Status:** Repository foundation, passive interface inventory, explicit one-shot TCP probes, and foreground monitoring are implemented; persistence and analysis remain planned.
 
 Network Forensics is a Linux-first, privacy-conscious network diagnostic tool that connects observed connectivity failures to local interface, routing, DNS, and system events. It helps answer *what happened, when, what evidence supports an explanation, and what to check next*.
 
@@ -24,11 +24,12 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   address and port; it does not establish general Internet connectivity. The
   gateway/external role is a caller-supplied label and is not independently
   validated against routing state.
+- `netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS]` emits newline-delimited JSON interface snapshots and probe results until Ctrl+C. It requires two distinct external targets and accepts one optional gateway target. Probes run sequentially with no retries or overlapping rounds. The interval is a pause after each round completes: it defaults to 10000 ms and is bounded to 1000–3600000 ms. A Ctrl+C waits for the in-progress probe to finish or time out (at most 30000 ms).
 
 ## Planned capabilities
 
 - Periodic local-gateway and multiple external endpoint probes, with explicit handling of blocked/unresponsive probe methods.
-- Interface change tracking, selected counters, scheduled probes, and monitoring.
+- Interface change tracking, selected counters, and persisted monitoring history.
 - Timestamped local evidence and persistent SQLite incident history.
 - Explainable, conservative rule-based incident analysis and human/JSON reports.
 - Replayable synthetic incidents for deterministic diagnosis tests.
