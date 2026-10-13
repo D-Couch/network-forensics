@@ -74,6 +74,7 @@ pub enum StorageError {
     InvalidEventSchema(u16),
     InvalidPolicy(&'static str),
     InvalidDataHome,
+    DatabaseNotFound,
     InvalidCursor,
     InvalidPageSize,
     InvalidDatabasePath,
@@ -98,6 +99,7 @@ impl fmt::Display for StorageError {
             Self::InvalidDataHome => formatter.write_str(
                 "an absolute XDG_DATA_HOME or HOME directory is required for local storage",
             ),
+            Self::DatabaseNotFound => formatter.write_str("event database does not exist yet"),
             Self::InvalidCursor => formatter.write_str("event sequence cursor must be nonnegative"),
             Self::InvalidPageSize => {
                 formatter.write_str("event page size must be between 1 and 1000")
@@ -169,9 +171,22 @@ impl EventStore {
         open_database(&path, policy)
     }
 
+    /// Opens the existing default database without creating or migrating it.
+    pub fn open_default_read_only() -> Result<Self, StorageError> {
+        let data_home = env::var_os("XDG_DATA_HOME").map(PathBuf::from);
+        let home = env::var_os("HOME").map(PathBuf::from);
+        let path = resolve_database_path(data_home.as_deref(), home.as_deref())?;
+        Self::open_read_only(path)
+    }
+
     /// Opens a database path whose parent directory already exists.
     pub fn open(path: impl AsRef<Path>, policy: RetentionPolicy) -> Result<Self, StorageError> {
         open_database(path.as_ref(), policy)
+    }
+
+    /// Opens an existing database without changing its schema or contents.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, StorageError> {
+        open_existing_read_only(path.as_ref())
     }
 
     /// Creates an in-memory store for deterministic tests.
@@ -322,6 +337,44 @@ fn open_database(path: &Path, policy: RetentionPolicy) -> Result<EventStore, Sto
         | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let connection = Connection::open_with_flags(path, flags)?;
     initialize(connection, policy)
+}
+
+fn open_existing_read_only(path: &Path) -> Result<EventStore, StorageError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(StorageError::DatabaseNotFound)
+        }
+        Err(error) => return Err(StorageError::Io(error)),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(StorageError::SymlinkPath);
+    }
+    if !metadata.is_file() {
+        return Err(StorageError::InvalidDatabasePath);
+    }
+    if metadata.len() > MAX_DATABASE_SIZE_BYTES {
+        return Err(StorageError::DatabaseTooLarge);
+    }
+    reject_symlink(path)?;
+
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let connection = Connection::open_with_flags(path, flags)?;
+    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version != STORAGE_SCHEMA_VERSION {
+        return Err(StorageError::UnsupportedSchema(version));
+    }
+    let page_size: i64 = connection.pragma_query_value(None, "page_size", |row| row.get(0))?;
+    let page_count: i64 = connection.pragma_query_value(None, "page_count", |row| row.get(0))?;
+    if page_count > (MAX_DATABASE_SIZE_BYTES / page_size as u64) as i64 {
+        return Err(StorageError::DatabaseTooLarge);
+    }
+    Ok(EventStore {
+        connection,
+        policy: RetentionPolicy::default(),
+    })
 }
 
 fn initialize(
@@ -515,6 +568,41 @@ mod tests {
         assert_eq!(page[1].sequence, 2);
         assert_eq!(page[1].event, second);
         assert!(store.read_events_after(page[0].sequence, 10).unwrap().len() == 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn read_only_open_does_not_create_or_modify_the_database() {
+        let root = temp_dir();
+        let path = root.join(DATABASE_FILE_NAME);
+        assert!(matches!(
+            EventStore::open_read_only(&path),
+            Err(StorageError::DatabaseNotFound)
+        ));
+        assert!(!path.exists());
+
+        {
+            let mut store = EventStore::open(&path, RetentionPolicy::default()).unwrap();
+            store
+                .store_events_at(
+                    &[event("saved", "2026-10-12T23:59:00Z")],
+                    "2026-10-13T00:00:00Z".parse().unwrap(),
+                )
+                .unwrap();
+        }
+        let before = fs::read(&path).unwrap();
+        {
+            let mut store = EventStore::open_read_only(&path).unwrap();
+            assert_eq!(store.event_count().unwrap(), 1);
+            assert_eq!(store.storage_schema_version().unwrap(), 1);
+            assert!(store
+                .store_events_at(
+                    &[event("not-saved", "2026-10-12T23:59:30Z")],
+                    "2026-10-13T00:00:00Z".parse().unwrap(),
+                )
+                .is_err());
+        }
+        assert_eq!(fs::read(&path).unwrap(), before);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -1,8 +1,8 @@
 # Network Forensics
 
-**Status:** Repository foundation, passive interface inventory, explicit one-shot TCP probes, foreground monitoring, bounded local event persistence, and a deterministic probe-incident lifecycle core are implemented.
+**Status:** Repository foundation, passive interface inventory, explicit one-shot TCP probes, foreground monitoring, bounded local event persistence, a deterministic probe-incident lifecycle core, and read-only incident history are implemented.
 
-Network Forensics is a Linux-first, privacy-conscious network diagnostic tool in early development. The current CLI inventories local interfaces, performs explicitly configured TCP connection probes, and emits foreground observations. A pure Rust API groups stored probe events into conservative target-level incidents; incident history is not yet exposed in the CLI, and diagnostic explanations remain planned.
+Network Forensics is a Linux-first, privacy-conscious network diagnostic tool in early development. The current CLI inventories local interfaces, performs explicitly configured TCP connection probes, emits foreground observations, and displays incident history derived from stored probe events. Diagnostic explanations remain planned.
 
 Unlike a ping-only monitor, it aims to distinguish observed facts from inferred fault domains. The intended initial executable is `netforensics`.
 
@@ -25,8 +25,9 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   gateway/external role is a caller-supplied label and is not independently
   validated against routing state.
 - `netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]` emits newline-delimited JSON interface snapshots and probe results until Ctrl+C, and stores each cycle locally in SQLite. It requires two distinct external targets and accepts one optional gateway target. Probes run sequentially with no retries or overlapping rounds. The interval is a pause after each round completes: it defaults to 10000 ms and is bounded to 1000–3600000 ms. A Ctrl+C waits for the in-progress probe to finish or time out (at most 30000 ms).
+- `netforensics incidents` reads the existing local database without creating or changing it, then lists incidents derived from stored probe events. It reports target, status, event sequence/times, evidence IDs, and gap/clock-adjustment uncertainty. It makes no network connections and does not store derived incidents. If there is no event database, the command reports that history is not available yet.
 
-The incident lifecycle API analyzes stored/synthetic events without I/O. By default, two consecutive timeouts or network/host-unreachable results for the same role and IP:port within 30 seconds open an incident; two consecutive successful probes recover it. Refused, ambiguous, unsupported, or blocked outcomes do not qualify. Gaps over 60 seconds and backward timestamps reset streaks and are retained as uncertainty markers. Derived incidents are not separately persisted and have no CLI listing yet.
+The incident lifecycle API analyzes stored/synthetic events without I/O. By default, two consecutive timeouts or network/host-unreachable results for the same role and IP:port within 30 seconds open an incident; two consecutive successful probes recover it. Refused, ambiguous, unsupported, or blocked outcomes do not qualify. Gaps over 60 seconds and backward timestamps reset streaks and are retained as uncertainty markers. Derived incidents are not separately persisted; each history query recomputes them from retained events.
 
 The database is `$XDG_DATA_HOME/netforensics/events.sqlite3`, or
 `$HOME/.local/share/netforensics/events.sqlite3` when XDG_DATA_HOME is unset.
@@ -40,12 +41,11 @@ before deleting the database file to clear history.
 
 ## Planned capabilities
 
-- Paged incident-history CLI and related end-to-end history workflows.
 - DNS-specific probes and interface change tracking with selected counters.
 - Explainable, conservative rule-based incident analysis and human/JSON reports.
 - Replayable synthetic incidents for deterministic diagnosis tests.
 
-These are **planned features**, not currently implemented. The incident lifecycle core is available as a Rust API; CLI history queries and persistence of derived incident records remain planned.
+These are **planned features**, not currently implemented. Derived incident persistence and diagnostic explanations remain planned.
 
 ## Safety and privacy
 

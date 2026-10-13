@@ -15,11 +15,11 @@ Milestones are sequential targets, not commitments to ship all features immediat
 
 - [x] **Task 0005 — Local event storage:** versioned SQLite schema, per-user path, transactional cycle writes, bounded retention, and storage failure handling.
 - [x] **Task 0006 — Probe incident lifecycle:** configurable consecutive failure/recovery thresholds with conservative handling of unknown outcomes, timestamp gaps, and clock changes.
-- [ ] **Task 0007 — Incident history CLI:** page stored events through the lifecycle engine and expose incident listings with end-to-end history scenarios.
+- [x] **Task 0007 — Incident history CLI:** page stored events through the lifecycle engine and expose incident listings with end-to-end history scenarios.
 
 M1 work was delivered across commits after Task 0001. Task specifications are
-kept under `tasks/`; Task 0006 implements only the in-memory lifecycle API, so
-incident listings remain part of Task 0007.
+kept under `tasks/`; Task 0007 adds a read-only history query over retained
+events, without persisting derived incident records.
 
 **M2 exit:** Recorded connectivity failures are queryable as incident timelines.
 

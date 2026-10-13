@@ -27,7 +27,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 - `probes`: explicit TCP reachability checks (implemented); DNS checks remain planned.
 - `monitor`: sequential round scheduling and cancellation (implemented); bounded fan-in remains a future reliability concern.
 - `storage`: SQLite persistence and migration (implemented in M2).
-- `incidents`: deterministic probe-target lifecycle over stored events (Task 0006 implemented); incident history CLI and derived-record persistence remain planned.
+- `incidents`: deterministic probe-target lifecycle over stored events (Task 0006) and read-only history CLI (Task 0007); derived-record persistence remains planned.
 - `analysis`: conservative rule engine (M3 onward).
 - `report`: human/JSON exports (M3 onward).
 - `replay`: fixture ingestion into incident and analysis pipeline (M3 onward).
@@ -113,7 +113,7 @@ Planned variants include `dns_result`, `link_speed_changed`,
 
 Task 0006 implements `incidents::analyze_events`, a pure Rust API over stored events. It groups by exact `(probe role, numeric IP:port)` and opens an incident after two consecutive timeouts, network-unreachable, or host-unreachable outcomes within 30 seconds. Two consecutive successful TCP connects recover it. Refused, ambiguous, unsupported, or blocked outcomes break streaks and do not qualify. Counts, failure window, and maximum observation gap are configurable with validation; defaults are two failures, two successes, 30 seconds, and 60 seconds.
 
-Stored insertion sequence defines order. A forward timestamp gap beyond the configured maximum or a backward timestamp resets pending streaks and marks an already-open incident with the corresponding uncertainty flag. Neither is evidence of continuous downtime. Incident IDs derive from the first stored sequence, and results retain failure/recovery event IDs. This module performs no I/O, networking, diagnosis, or incident persistence; a history CLI and separate derived-record storage remain future work.
+Stored insertion sequence defines order. A forward timestamp gap beyond the configured maximum or a backward timestamp resets pending streaks and marks an already-open incident with the corresponding uncertainty flag. Neither is evidence of continuous downtime. Incident IDs derive from the first stored sequence, and results retain failure/recovery event IDs. The `incidents` CLI reads event pages in sequence order from the existing database and passes the full retained history through the pure engine; it opens the database read-only and does not create or migrate it. It performs no network activity or diagnosis. Derived records remain unpersisted and are recomputed for each query.
 
 ## 6. Current event storage
 
@@ -138,8 +138,8 @@ delay later sampling; a bounded asynchronous writer is future reliability work.
 
 See [ADR 0001](decisions/0001-local-event-storage.md) for the payload/index
 trade-off and dependency choice, and [ADR 0002](decisions/0002-probe-incident-lifecycle.md)
-for incident semantics. The incident lifecycle is currently a pure API over
-stored events; derived incident records and a history CLI are not implemented.
+for incident semantics. The history CLI reads stored events without writing to
+the database. Derived incident records are not persisted.
 
 ## 7. Permissions and deployment
 

@@ -39,6 +39,11 @@ validation, schema rejection, forward observation gaps, backward timestamps,
 and configuration bounds. They must not create network connections or open the
 default event database.
 
+Incident history CLI tests use in-memory or temporary SQLite stores. They cover
+empty history, rendered evidence and status, continuation across event-page
+boundaries, missing-database behavior, and that read-only access cannot write
+or alter the schema. They must not open the default user database.
+
 The routine test suite must remain deterministic and must not invoke live probe
 targets. Manual interface inventory can read the host's sysfs/procfs and is
 environment-dependent; it is not a substitute for the fixture-based unit tests.

@@ -34,7 +34,7 @@ Record relevant, timestamped observations; assemble them into coherent incidents
 
 ### FR-01 CLI and configuration
 
-The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, and `report --latest`. The current implementation provides help/version, `interfaces`, one-shot `probe`, and foreground `monitor`; `status`, `incidents`, `analyze`, and `report` remain planned. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
+The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, and `report --latest`. The current implementation provides help/version, `interfaces`, one-shot `probe`, foreground `monitor`, and read-only `incidents`; `status`, `analyze`, and `report` remain planned. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
 
 ### FR-02 Probe observation
 
@@ -50,7 +50,7 @@ Optionally consume relevant kernel/journald observations with documented permiss
 
 ### FR-05 Incidents
 
-The Task 0006 pure Rust lifecycle API groups stored probe events by exact role and numeric IP:port. Two consecutive timeout, network-unreachable, or host-unreachable outcomes within the default 30-second window open an incident; two consecutive successes recover it. Refused, ambiguous, unsupported, and blocked outcomes do not qualify. Validated configuration controls thresholds and windows, and sequence order plus gap/clock-adjustment markers preserve uncertainty. Incident history CLI and persistence of derived incident records remain future work.
+The Task 0006 pure Rust lifecycle API groups stored probe events by exact role and numeric IP:port. Two consecutive timeout, network-unreachable, or host-unreachable outcomes within the default 30-second window open an incident; two consecutive successes recover it. Refused, ambiguous, unsupported, and blocked outcomes do not qualify. Validated configuration controls thresholds and windows, and sequence order plus gap/clock-adjustment markers preserve uncertainty. Task 0007 provides a read-only CLI history query; derived incident persistence remains future work.
 
 ### FR-06 Diagnosis
 
@@ -58,7 +58,7 @@ Classify cautiously into broad fault domains: local link/interface, local gatewa
 
 ### FR-07 Persistence and export
 
-Persist records locally in SQLite, with schema migration strategy, retention options, and explicit handling of write failures. The current implementation persists versioned observation events with indexed metadata and bounded retention; incident persistence and query commands remain future work. Export machine-readable JSON and readable incident reports. Sanitization/redaction is on by default for shared reports; avoid including raw IPs, hostnames, MACs, paths, SSIDs, or usernames unless a user explicitly opts in.
+Persist records locally in SQLite, with schema migration strategy, retention options, and explicit handling of write failures. The current implementation persists versioned observation events with indexed metadata and bounded retention; the `incidents` command reads these events without modifying the database and recomputes derived incident results. Persistence of derived incidents remains future work. Export machine-readable JSON and readable incident reports. Sanitization/redaction is on by default for shared reports; avoid including raw IPs, hostnames, MACs, paths, SSIDs, or usernames unless a user explicitly opts in.
 
 ### FR-08 Replay
 
@@ -89,7 +89,7 @@ Gracefully handle SIGINT/shutdown; bound memory and queues; persist without bloc
 
 ## 8. Proposed default experience
 
-`netforensics monitor` starts foreground collection with concise status; users can stop with Ctrl+C. Later: `netforensics incidents`, `netforensics analyze --latest`, and `netforensics report --latest`. If no default gateway exists (VPN-only, offline, unusual routes), explain the limitation and let the user select targets rather than guessing.
+`netforensics monitor` starts foreground collection with concise status; users can stop with Ctrl+C. `netforensics incidents` lists history already stored locally. Later: `netforensics analyze --latest` and `netforensics report --latest`. If no default gateway exists (VPN-only, offline, unusual routes), explain the limitation and let the user select targets rather than guessing.
 
 ## 9. Acceptance examples
 

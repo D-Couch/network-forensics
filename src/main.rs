@@ -8,15 +8,18 @@ pub mod storage;
 use crate::event::{
     Event, EventKind, ProbeFailureCategory, ProbeLimitationCategory, ProbeOutcome, ProbeRole,
 };
+use crate::incidents::{analyze_events, Incident, IncidentError, IncidentStatus};
 use crate::monitor::{MonitorConfig, DEFAULT_INTERVAL_MILLIS};
 use crate::probes::{ProbeConfig, ProbeRunner, ProbeTarget, SystemClock, SystemTransport};
-use crate::storage::{RetentionPolicy, DEFAULT_MAX_EVENTS, DEFAULT_RETENTION_DAYS};
+use crate::storage::{
+    EventStore, RetentionPolicy, StorageError, DEFAULT_MAX_EVENTS, DEFAULT_RETENTION_DAYS,
+};
 use std::env;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, and foreground monitoring are available; incident analysis is planned.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All probe targets must be numeric IP addresses; no DNS lookup is performed.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, and local incident history are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All probe targets must be numeric IP addresses; no DNS lookup is performed. Incident history is read-only and uses local stored events.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -26,6 +29,12 @@ fn main() {
         [arg] if arg == "--version" || arg == "-V" => {
             println!("netforensics {}", env!("CARGO_PKG_VERSION"))
         }
+        [command] if command == "incidents" => {
+            if let Err(error) = run_incidents() {
+                eprintln!("Could not read incident history: {error}");
+                std::process::exit(1);
+            }
+        }
         [arg] if arg == "interfaces" => match interfaces::discover() {
             Ok(discovery) => print_interfaces(discovery),
             Err(error) => {
@@ -34,6 +43,9 @@ fn main() {
             }
         },
         [command, flag] if command == "probe" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
+        }
+        [command, flag] if command == "incidents" && (flag == "--help" || flag == "-h") => {
             print!("{HELP}");
         }
         [command, role, target] if command == "probe" => {
@@ -70,6 +82,141 @@ fn main() {
             std::process::exit(2);
         }
     }
+}
+
+fn run_incidents() -> Result<(), Box<dyn std::error::Error>> {
+    let store = EventStore::open_default_read_only()?;
+    let incidents = load_incidents(&store)?;
+    print_incidents(&incidents);
+    Ok(())
+}
+
+fn load_incidents(store: &EventStore) -> Result<Vec<Incident>, HistoryError> {
+    let mut events = Vec::new();
+    let mut cursor = 0;
+    loop {
+        let page = store.read_events_after(cursor, 1_000)?;
+        let Some(last) = page.last() else {
+            break;
+        };
+        cursor = last.sequence;
+        events.extend(page);
+    }
+    Ok(analyze_events(
+        &events,
+        crate::incidents::IncidentConfig::default(),
+    )?)
+}
+
+#[derive(Debug)]
+enum HistoryError {
+    Storage(StorageError),
+    Incident(IncidentError),
+}
+
+impl std::fmt::Display for HistoryError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Storage(error) => error.fmt(formatter),
+            Self::Incident(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for HistoryError {}
+
+impl From<StorageError> for HistoryError {
+    fn from(error: StorageError) -> Self {
+        Self::Storage(error)
+    }
+}
+
+impl From<IncidentError> for HistoryError {
+    fn from(error: IncidentError) -> Self {
+        Self::Incident(error)
+    }
+}
+
+fn print_incidents(incidents: &[Incident]) {
+    println!("{}", render_incidents(incidents));
+}
+
+fn render_incidents(incidents: &[Incident]) -> String {
+    if incidents.is_empty() {
+        return "No probe incidents found in local event history.".to_owned();
+    }
+    use std::fmt::Write as _;
+    let mut output = String::new();
+    for (index, incident) in incidents.iter().enumerate() {
+        if index > 0 {
+            output.push('\n');
+        }
+        let status = match incident.status {
+            IncidentStatus::Open => "OPEN",
+            IncidentStatus::Recovered => "RECOVERED",
+        };
+        writeln!(output, "{} [{status}]", incident.id).unwrap();
+        writeln!(
+            output,
+            "  Target: {:?} {}",
+            incident.target.role, incident.target.address
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  Started: {} (sequence {})",
+            incident.started_at_utc, incident.started_sequence
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  Last failure: {} (sequence {})",
+            incident.last_failure_at_utc, incident.last_failure_sequence
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  Failure evidence: {}",
+            format_evidence_ids(&incident.failure_event_ids)
+        )
+        .unwrap();
+        if let (Some(recovered_at), Some(sequence)) =
+            (incident.recovered_at_utc, incident.recovered_sequence)
+        {
+            writeln!(output, "  Recovered: {recovered_at} (sequence {sequence})").unwrap();
+            writeln!(
+                output,
+                "  Recovery evidence: {}",
+                format_evidence_ids(&incident.recovery_event_ids)
+            )
+            .unwrap();
+        }
+        if incident.contains_observation_gap {
+            writeln!(
+                output,
+                "  Uncertainty: observation gap while incident was open"
+            )
+            .unwrap();
+        }
+        if incident.contains_clock_adjustment {
+            writeln!(
+                output,
+                "  Uncertainty: event timestamps moved backwards while incident was open"
+            )
+            .unwrap();
+        }
+    }
+    output
+}
+
+fn format_evidence_ids(ids: &[String]) -> String {
+    if ids.is_empty() {
+        return "none".to_owned();
+    }
+    ids.iter()
+        .map(|id| id.escape_debug().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn parse_monitor_args(args: &[String]) -> Result<MonitorConfig, String> {
@@ -217,6 +364,7 @@ pub(crate) fn next_event_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::{ProbeMethod, SCHEMA_VERSION};
 
     #[test]
     fn probe_target_parser_accepts_numeric_ipv4_and_ipv6() {
@@ -305,6 +453,55 @@ mod tests {
             args[index] = invalid.to_owned();
             assert!(parse_monitor_args(&args).is_err());
         }
+    }
+
+    fn history_event(id: String, outcome: ProbeOutcome) -> Event {
+        let at = "2026-10-13T00:00:00Z".parse().unwrap();
+        Event {
+            schema_version: SCHEMA_VERSION,
+            id,
+            recorded_at_utc: at,
+            source: "probe".to_owned(),
+            kind: EventKind::ProbeResult {
+                role: ProbeRole::External,
+                target: "192.0.2.8:443".parse().unwrap(),
+                method: ProbeMethod::TcpConnect,
+                started_at_utc: at,
+                elapsed_ms: 10,
+                outcome,
+            },
+        }
+    }
+
+    #[test]
+    fn incident_history_reports_empty_database_clearly() {
+        let store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
+        let incidents = load_incidents(&store).unwrap();
+        assert!(incidents.is_empty());
+        assert_eq!(
+            render_incidents(&incidents),
+            "No probe incidents found in local event history."
+        );
+    }
+
+    #[test]
+    fn incident_evidence_crosses_stored_event_page_boundary() {
+        let mut store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
+        let mut events = (0..999)
+            .map(|index| history_event(format!("ok-{index}"), ProbeOutcome::Success))
+            .collect::<Vec<_>>();
+        events.push(history_event("fail-a".to_owned(), ProbeOutcome::Timeout));
+        events.push(history_event("fail-b".to_owned(), ProbeOutcome::Timeout));
+        store
+            .store_events_at(&events, "2026-10-13T00:00:00Z".parse().unwrap())
+            .unwrap();
+
+        let incidents = load_incidents(&store).unwrap();
+        assert_eq!(incidents.len(), 1);
+        let output = render_incidents(&incidents);
+        assert!(output.contains("incident-1000 [OPEN]"));
+        assert!(output.contains("Target: External 192.0.2.8:443"));
+        assert!(output.contains("Failure evidence: fail-a, fail-b"));
     }
 }
 
