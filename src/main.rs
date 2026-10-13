@@ -6,6 +6,7 @@ pub mod interfaces;
 pub mod monitor;
 pub mod probes;
 pub mod replay;
+pub mod report;
 pub mod storage;
 
 use crate::event::{
@@ -22,7 +23,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, and local incident history are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. Incident history is read-only and uses local stored events.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -35,6 +36,34 @@ fn main() {
         [command] if command == "incidents" => {
             if let Err(error) = run_incidents() {
                 eprintln!("Could not read incident history: {error}");
+                std::process::exit(1);
+            }
+        }
+        [command, flag] if command == "analyze" && flag == "--latest" => {
+            if let Err(error) = run_analyze_latest() {
+                eprintln!("Could not analyze stored history: {error}");
+                std::process::exit(1);
+            }
+        }
+        [command, flag] if command == "analyze" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
+        }
+        [command, flag] if command == "report" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
+        }
+        [command, rest @ ..] if command == "report" => {
+            let options = match parse_report_args(rest) {
+                Ok(options) => options,
+                Err(error) => {
+                    eprintln!("Invalid report options: {error}\n\n{HELP}");
+                    std::process::exit(2);
+                }
+            };
+            if options.include_identifiers {
+                eprintln!("Warning: report includes raw configured target addresses; review before sharing.");
+            }
+            if let Err(error) = run_report_latest(options) {
+                eprintln!("Could not report stored history: {error}");
                 std::process::exit(1);
             }
         }
@@ -95,6 +124,13 @@ fn run_incidents() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn load_incidents(store: &EventStore) -> Result<Vec<Incident>, HistoryError> {
+    Ok(analyze_events(
+        &load_events(store)?,
+        crate::incidents::IncidentConfig::default(),
+    )?)
+}
+
+fn load_events(store: &EventStore) -> Result<Vec<storage::StoredEvent>, StorageError> {
     let mut events = Vec::new();
     let mut cursor = 0;
     loop {
@@ -105,16 +141,108 @@ fn load_incidents(store: &EventStore) -> Result<Vec<Incident>, HistoryError> {
         cursor = last.sequence;
         events.extend(page);
     }
-    Ok(analyze_events(
-        &events,
-        crate::incidents::IncidentConfig::default(),
-    )?)
+    Ok(events)
+}
+
+struct AnalysisHistory {
+    incidents: Vec<Incident>,
+    findings: Vec<analysis::Finding>,
+}
+
+fn load_analysis(store: &EventStore) -> Result<AnalysisHistory, HistoryError> {
+    let events = load_events(store)?;
+    let incidents = analyze_events(&events, crate::incidents::IncidentConfig::default())?;
+    let findings =
+        analysis::analyze_incidents(&events, &incidents, analysis::AnalysisConfig::default())?;
+    Ok(AnalysisHistory {
+        incidents,
+        findings,
+    })
+}
+
+fn run_analyze_latest() -> Result<(), HistoryError> {
+    let store = EventStore::open_default_read_only()?;
+    let history = load_analysis(&store)?;
+    println!("{}", report::render_analysis(&history.findings));
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReportFormat {
+    Text,
+    Json,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReportOptions {
+    format: ReportFormat,
+    include_identifiers: bool,
+}
+
+fn parse_report_args(args: &[String]) -> Result<ReportOptions, String> {
+    if args.first().map(String::as_str) != Some("--latest") {
+        return Err("report requires --latest".to_owned());
+    }
+    let mut options = ReportOptions {
+        format: ReportFormat::Text,
+        include_identifiers: false,
+    };
+    let mut index = 1;
+    let mut format_seen = false;
+    let mut identifiers_seen = false;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--format" => {
+                if format_seen {
+                    return Err("--format may be specified only once".to_owned());
+                }
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --format".to_owned())?;
+                options.format = match value.as_str() {
+                    "text" => ReportFormat::Text,
+                    "json" => ReportFormat::Json,
+                    _ => return Err("report format must be 'text' or 'json'".to_owned()),
+                };
+                format_seen = true;
+                index += 2;
+            }
+            "--include-identifiers" => {
+                if identifiers_seen {
+                    return Err("--include-identifiers may be specified only once".to_owned());
+                }
+                options.include_identifiers = true;
+                identifiers_seen = true;
+                index += 1;
+            }
+            option => return Err(format!("unknown report option {option}")),
+        }
+    }
+    Ok(options)
+}
+
+fn run_report_latest(options: ReportOptions) -> Result<(), HistoryError> {
+    let store = EventStore::open_default_read_only()?;
+    let history = load_analysis(&store)?;
+    let report = report::build_report(
+        &history.incidents,
+        &history.findings,
+        options.include_identifiers,
+    );
+    let rendered = match options.format {
+        ReportFormat::Text => report::render_text(&report),
+        ReportFormat::Json => report::render_json(&report).map_err(HistoryError::Json)?,
+    };
+    println!("{rendered}");
+    Ok(())
 }
 
 #[derive(Debug)]
 enum HistoryError {
     Storage(StorageError),
     Incident(IncidentError),
+    Analysis(analysis::AnalysisError),
+    Json(serde_json::Error),
 }
 
 impl std::fmt::Display for HistoryError {
@@ -122,6 +250,8 @@ impl std::fmt::Display for HistoryError {
         match self {
             Self::Storage(error) => error.fmt(formatter),
             Self::Incident(error) => error.fmt(formatter),
+            Self::Analysis(error) => error.fmt(formatter),
+            Self::Json(error) => error.fmt(formatter),
         }
     }
 }
@@ -137,6 +267,18 @@ impl From<StorageError> for HistoryError {
 impl From<IncidentError> for HistoryError {
     fn from(error: IncidentError) -> Self {
         Self::Incident(error)
+    }
+}
+
+impl From<analysis::AnalysisError> for HistoryError {
+    fn from(error: analysis::AnalysisError) -> Self {
+        Self::Analysis(error)
+    }
+}
+
+impl From<serde_json::Error> for HistoryError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
     }
 }
 
@@ -470,6 +612,36 @@ mod tests {
     }
 
     #[test]
+    fn report_parser_defaults_to_sanitized_text_and_validates_options() {
+        let latest = ["--latest".to_owned()];
+        assert_eq!(
+            parse_report_args(&latest).unwrap(),
+            ReportOptions {
+                format: ReportFormat::Text,
+                include_identifiers: false,
+            }
+        );
+        let json = ["--latest", "--format", "json"];
+        let json = json.map(str::to_owned);
+        assert_eq!(parse_report_args(&json).unwrap().format, ReportFormat::Json);
+        let raw = ["--latest", "--include-identifiers"].map(str::to_owned);
+        assert!(parse_report_args(&raw).unwrap().include_identifiers);
+        for args in [
+            vec!["--format".into(), "json".into()],
+            vec!["--latest".into(), "--format".into(), "yaml".into()],
+            vec!["--latest".into(), "--unknown".into()],
+            vec!["--latest".into(), "--format".into()],
+            vec![
+                "--latest".into(),
+                "--include-identifiers".into(),
+                "--include-identifiers".into(),
+            ],
+        ] {
+            assert!(parse_report_args(&args).is_err());
+        }
+    }
+
+    #[test]
     fn monitor_parser_accepts_and_validates_retention_options() {
         let args = [
             "--external".to_owned(),
@@ -526,6 +698,28 @@ mod tests {
             render_incidents(&incidents),
             "No probe incidents found in local event history."
         );
+    }
+
+    #[test]
+    fn analysis_history_uses_paged_stored_events_without_writing() {
+        let mut store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
+        store
+            .store_events_at(
+                &[
+                    history_event("fail-a".to_owned(), ProbeOutcome::Timeout),
+                    history_event("fail-b".to_owned(), ProbeOutcome::Timeout),
+                ],
+                "2026-10-13T00:00:00Z".parse().unwrap(),
+            )
+            .unwrap();
+        let before = store.event_count().unwrap();
+        let history = load_analysis(&store).unwrap();
+        assert_eq!(history.incidents.len(), 1);
+        assert_eq!(history.findings.len(), 1);
+        assert_eq!(store.event_count().unwrap(), before);
+        let output = report::render_analysis(&history.findings);
+        assert!(output.contains("undetermined"));
+        assert!(output.contains("fail-a, fail-b"));
     }
 
     #[test]

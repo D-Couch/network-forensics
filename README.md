@@ -26,10 +26,11 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   validated against routing state.
 - `netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]` emits newline-delimited JSON interface snapshots and probe results until Ctrl+C, and stores each cycle locally in SQLite. It requires two distinct external targets and accepts one optional gateway target. DNS is queried only when the single optional `--dns-name` is provided; it must be a fully qualified ASCII name ending in a dot, such as `example.com.`. The configured system nameserver setup is used; `/etc/hosts` is bypassed. TCP and DNS observations run sequentially with no application retry or overlapping rounds and use the configured bounded timeout. The interval is a pause after each round completes: it defaults to 10000 ms and is bounded to 1000–3600000 ms. A Ctrl+C waits for the in-progress bounded probe to finish.
 - `netforensics incidents` reads the existing local database without creating or changing it, then lists incidents derived from stored probe events. It reports target, status, event sequence/times, evidence IDs, and gap/clock-adjustment uncertainty. It makes no network connections and does not store derived incidents. If there is no event database, the command reports that history is not available yet.
+- `netforensics analyze --latest` prints conservative findings for derived incidents. `netforensics report --latest` renders a text report; add `--format json` for versioned JSON. Target addresses are redacted to stable role-scoped labels by default. `--include-identifiers` includes configured target addresses and prints a warning to stderr. Reports retain event IDs and timestamps, omit raw event payloads and DNS query names, and read the database without modifying it.
 
 The incident lifecycle API analyzes stored/synthetic events without I/O. By default, two consecutive timeouts or network/host-unreachable results for the same role and IP:port within 30 seconds open an incident; two consecutive successful probes recover it. Refused, ambiguous, unsupported, or blocked outcomes do not qualify. Gaps over 60 seconds and backward timestamps reset streaks and are retained as uncertainty markers. Derived incidents are not separately persisted; each history query recomputes them from retained events.
 
-The analysis API provides deterministic, evidence-cited findings using a 60-second correlation window. It can identify local-link-related evidence, failures at the caller-configured gateway-role target, failures across multiple external targets, endpoint-specific evidence when a separate external target succeeds, and a failed configured DNS query alongside independent external TCP success. DNS wording describes concurrent query failure evidence, not proof DNS caused an incident or that the Internet is unavailable. It leaves other cases undetermined, cites event IDs, and states its limitations; it does not diagnose root causes. The API is not yet exposed as a CLI report.
+The analysis API and CLI provide deterministic, evidence-cited findings using a 60-second correlation window. They can identify local-link-related evidence, failures at the caller-configured gateway-role target, failures across multiple external targets, endpoint-specific evidence when a separate external target succeeds, and a failed configured DNS query alongside independent external TCP success. DNS wording describes concurrent query failure evidence, not proof DNS caused an incident or that the Internet is unavailable. Other cases remain undetermined; findings cite event IDs and state limitations, and do not diagnose root causes.
 
 DNS query names are persisted in the private local event database because they can identify people or organizations; answer counts are retained, returned IP addresses are not. Event schema v2 is written, while schema-v1 history remains readable. Hickory uses system resolver configuration but does not reproduce every host NSS/resolver behavior; see [ADR 0004](docs/decisions/0004-system-configured-dns-observation.md).
 
@@ -47,14 +48,13 @@ before deleting the database file to clear history.
 
 ## Planned capabilities
 
-- Interface change tracking with selected counters.
-- Analysis and report CLI, JSON export, and additional evidence rules.
+- Interface change tracking with selected counters and additional evidence rules.
 
-These are **planned features**, not currently implemented. The analysis rules are available only through a Rust API; derived incident persistence and user-facing reports remain planned.
+These are **planned features**, not currently implemented. Derived incident persistence and report file export remain planned.
 
 ## Safety and privacy
 
-Read-only monitoring by default; no packet payload collection, network configuration changes, or runtime telemetry. The current monitor makes only the TCP connections explicitly configured by the user and sends DNS queries only for an explicitly configured name. Local event history can contain IP addresses, interface names, and DNS query names; it is stored in a per-user database with restrictive Unix permissions and is never synced by the application. Shared diagnostic reports must redact identifiable network details by default. Additional privileges and log collection will be opt-in and documented.
+Read-only monitoring by default; no packet payload collection, network configuration changes, or runtime telemetry. The current monitor makes only the TCP connections explicitly configured by the user and sends DNS queries only for an explicitly configured name. Local event history can contain IP addresses, interface names, and DNS query names; it is stored in a per-user database with restrictive Unix permissions and is never synced by the application. Reports redact target addresses by default; `--include-identifiers` opts into including configured target addresses and emits a warning. Additional privileges and log collection will be opt-in and documented.
 
 ## Project documents
 
@@ -73,8 +73,8 @@ Read-only monitoring by default; no packet payload collection, network configura
 3. Review changes and test results at each milestone. Task 0001 is complete; the current implementation and remaining work are summarized in this README and `docs/ROADMAP.md`.
 
 The Cargo package includes `--help`, `--version`, passive interface inventory,
-explicit TCP probes, foreground monitoring with local persistence, and a
-versioned event model. With Rust and Cargo installed, build and verify it with:
+explicit TCP probes, foreground monitoring with local persistence, incident
+history, analysis and reports. With Rust and Cargo installed, build and verify it with:
 
 ```sh
 cargo build
@@ -83,6 +83,8 @@ cargo run -- --version
 cargo run -- interfaces
 cargo run -- probe --help
 cargo run -- monitor --help
+cargo run -- analyze --latest
+cargo run -- report --latest --format json
 cargo test
 cargo fmt --check
 cargo clippy -- -D warnings

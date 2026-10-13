@@ -28,9 +28,20 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 - `monitor`: sequential round scheduling and cancellation (implemented); bounded fan-in remains a future reliability concern.
 - `storage`: SQLite persistence and migration (implemented in M2).
 - `incidents`: deterministic probe-target lifecycle over stored events (Task 0006) and read-only history CLI (Task 0007); derived-record persistence remains planned.
-- `analysis`: pure evidence-citing rules over current stored event types (Task 0008); CLI reports and additional event-source rules remain planned.
-- `report`: human/JSON exports (M3 onward).
+- `analysis`: pure evidence-citing rules over stored event types (Tasks 0008/0010), exposed by read-only `analyze --latest`.
+- `report`: pure versioned text/JSON reports, redacted by default (Task 0011); report file output remains future work.
 - `replay`: strict bounded JSON fixture replay through incident and analysis APIs (Task 0009); CLI replay remains planned.
+
+### Current analysis and report CLI
+
+`analyze --latest` reads retained events by insertion sequence, derives incidents,
+and renders their findings. `report --latest` performs the same analysis and
+renders incident timelines plus findings as text by default or versioned JSON
+with `--format json`. Both commands open the existing database read-only and
+perform no network activity. Reports map each distinct target consistently to
+a role-scoped label; `--include-identifiers` includes raw target addresses and
+prints a sharing warning to stderr. Report bodies contain event IDs and
+timestamps for evidence review but omit DNS query names and raw event payloads.
 
 **Implementation rule:** Keep one Cargo package and Rust modules. Extract crates only if justified by dependency separation or actual reuse. Do not scaffold unused modules.
 

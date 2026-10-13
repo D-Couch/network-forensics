@@ -34,7 +34,7 @@ Record relevant, timestamped observations; assemble them into coherent incidents
 
 ### FR-01 CLI and configuration
 
-The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, and `report --latest`. The current implementation provides help/version, `interfaces`, one-shot `probe`, foreground `monitor`, and read-only `incidents`; `status`, `analyze`, and `report` remain planned. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
+The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, and `report --latest`. The current implementation provides help/version, `interfaces`, one-shot `probe`, foreground `monitor`, read-only `incidents`, `analyze --latest`, and text/JSON `report --latest`; `status` remains planned. Reports redact configured target addresses by default and require explicit `--include-identifiers` to include them. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
 
 ### FR-02 Probe observation
 
@@ -54,11 +54,11 @@ The Task 0006 pure Rust lifecycle API groups stored probe events by exact role a
 
 ### FR-06 Diagnosis
 
-Tasks 0008 and 0010 provide a pure deterministic analysis API over stored TCP, DNS, and carrier observations. It can return local-link-related evidence, configured gateway-role target failure, multiple external targets failed, endpoint-specific evidence supported by another successful external target, DNS-query failure alongside independent external TCP success, or undetermined. DNS wording reports concurrent query failure evidence and does not establish causation or general reachability. Findings cite event IDs and include explanatory text, limitations, and a follow-up check. The 60-second correlation window is skipped when timestamps move backwards. These labels describe evidence and do not establish root causes; analysis CLI and report/export remain future work. No ML/LLM service is required.
+Tasks 0008 and 0010 provide a pure deterministic analysis API over stored TCP, DNS, and carrier observations. It can return local-link-related evidence, configured gateway-role target failure, multiple external targets failed, endpoint-specific evidence supported by another successful external target, DNS-query failure alongside independent external TCP success, or undetermined. Task 0011 exposes it through `analyze --latest` and read-only text/JSON reports. DNS wording reports concurrent query failure evidence and does not establish causation or general reachability. Findings cite event IDs and include explanatory text, limitations, and a follow-up check. The 60-second correlation window is skipped when timestamps move backwards. These labels describe evidence and do not establish root causes; report file export remains future work. No ML/LLM service is required.
 
 ### FR-07 Persistence and export
 
-Persist records locally in SQLite, with schema migration strategy, retention options, and explicit handling of write failures. The current implementation persists versioned observation events with indexed metadata and bounded retention; the `incidents` command reads these events without modifying the database and recomputes derived incident results. Persistence of derived incidents remains future work. Export machine-readable JSON and readable incident reports. Sanitization/redaction is on by default for shared reports; avoid including raw IPs, hostnames, MACs, paths, SSIDs, or usernames unless a user explicitly opts in.
+Persist records locally in SQLite, with schema migration strategy, retention options, and explicit handling of write failures. The current implementation persists versioned observation events with indexed metadata and bounded retention; `incidents`, `analyze --latest`, and `report --latest` read the database without modifying it and recompute derived results. Text and versioned JSON reports redact target addresses by default; raw target addresses appear only when explicitly requested and warned. DNS query names and raw event payloads are excluded from reports. Persistence of derived incidents and report files remains future work.
 
 ### FR-08 Replay
 
@@ -89,7 +89,7 @@ Gracefully handle SIGINT/shutdown; bound memory and queues; persist without bloc
 
 ## 8. Proposed default experience
 
-`netforensics monitor` starts foreground collection with concise status; users can stop with Ctrl+C. `netforensics incidents` lists history already stored locally. Later: `netforensics analyze --latest` and `netforensics report --latest`. If no default gateway exists (VPN-only, offline, unusual routes), explain the limitation and let the user select targets rather than guessing.
+`netforensics monitor` starts foreground collection with concise status; users can stop with Ctrl+C. `netforensics incidents` lists history already stored locally. `netforensics analyze --latest` and `netforensics report --latest` inspect retained observations. If no default gateway exists (VPN-only, offline, unusual routes), explain the limitation and let the user select targets rather than guessing.
 
 ## 9. Acceptance examples
 

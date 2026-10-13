@@ -16,6 +16,7 @@ The tool receives data from the local OS, active network probes, optional system
 - The replay API parses in-memory JSON fixture input only, enforces a 16 MiB/100000-event limit, rejects unknown fields and unsupported schemas, and performs no networking or database writes.
 - The foreground monitor persists observations locally and emits them to stdout. The `incidents` command reads this history locally without modifying the database. No runtime telemetry or cloud sync is implemented.
 - DNS queries are sent only when the user supplies one `--dns-name`; the name must be fully qualified and the lookup is bounded by the configured monitor timeout. System-configured recursive DNS servers are used; the application does not select a public resolver and bypasses hosts-file entries. DNS query names are stored locally because they can identify a person, organization, or internal service; returned IP addresses are not stored. Users should treat this field as private local data.
+- `analyze --latest` and `report --latest` open retained history read-only. Reports omit raw event payloads and DNS query names, and replace target addresses with stable role-scoped labels by default. `--include-identifiers` explicitly includes configured target addresses and emits a warning on stderr; event IDs and timestamps remain in either mode.
 - Never automatically alter routes, DNS, firewall, drivers, or interface state.
 
 ## Sensitive fields and exports

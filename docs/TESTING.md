@@ -31,6 +31,11 @@ resolver. Cover FQDN validation, opt-in CLI parsing, DNS result serialization
 without answer addresses, configured DNS event ordering and timeout, schema-v1
 history compatibility, and cautious DNS analysis with independent TCP success.
 
+Report tests exercise pure text/JSON rendering, empty history, sequence and
+evidence citations, stable target redaction, explicit raw-identifier opt-in,
+CLI option validation, and analysis over read-only paged stored events. They
+must not open the default database or make network requests.
+
 The event store tests use in-memory SQLite or temporary files. They cover
 schema migration and rejection, durable reopen and sequence paging, atomic
 rollback, age/count retention, path validation, Unix permissions, and symlink
