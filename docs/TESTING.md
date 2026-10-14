@@ -80,7 +80,9 @@ neutral link-up signals, out-of-window and backwards-timestamp suppression,
 caller-supplied gateway roles, endpoint
 specificity with an independent successful target, multiple external failures,
 stale evidence, backward timestamps, schema/sequence validation, and explicit
-undetermined limitations. They must not access the network or default database.
+undetermined limitations. Verify finding-specific follow-up checks for every
+classification, including wording that preserves evidence limits. They must
+not access the network or default database.
 
 Replay tests consume human-readable, versioned fixtures under
 `tests/fixtures/`, with a separate `expected.json` for each scenario. They run

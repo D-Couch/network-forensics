@@ -1,6 +1,6 @@
 # ADR 0003 — Conservative evidence-based analysis rules
 
-**Status:** Accepted for Tasks 0008 and 0014
+**Status:** Accepted for Tasks 0008, 0014, and 0018
 
 ## Context
 
@@ -16,6 +16,7 @@ The event model contains TCP probe results, link-carrier observations, and norma
 - Describe failures at multiple external targets as multi-target failure evidence, without asserting a common upstream cause.
 - Describe an external incident as endpoint-specific only when another external target succeeds and has no qualifying failure in the same window.
 - Leave unsupported or ambiguous cases undetermined. DNS-specific findings wait for a DNS observation event.
+- Make follow-up checks concrete and specific to the finding's evidence. Guidance may suggest verification or additional observations, but must not imply that the check proves a cause or instruct remediation unsupported by evidence.
 
 ## Consequences
 

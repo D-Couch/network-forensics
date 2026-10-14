@@ -222,7 +222,7 @@ fn analyze_one(
             (
                 FindingClassification::LocalLinkRelatedEvidence,
                 "A carrier-down or normalized kernel link-down/watchdog observation occurred within the incident correlation window. This is local-link-related evidence, not a diagnosis of a physical cause or proof that the signal caused the incident.".to_owned(),
-                "Check the selected interface state and compare the kernel observation with another monitoring period.".to_owned(),
+                "Review the nearby interface snapshot and counter deltas, then compare another monitoring period if the signal recurs. This does not identify a failed component or prove the interface carried these probes.".to_owned(),
                 local_link_signal_ids
                     .into_iter()
                     .map(|(_, id)| id)
@@ -232,14 +232,14 @@ fn analyze_one(
             (
                 FindingClassification::ConfiguredGatewayTargetFailure,
                 "The configured gateway-role TCP target repeatedly failed. The role is caller-provided and does not verify that this endpoint is the active gateway.".to_owned(),
-                "Verify the configured target and compare it with interface and route observations.".to_owned(),
+                "Confirm this IP:port is the endpoint you intended to label as the gateway; compare its failures with interface/route observations and a separate external target. The role does not verify the active gateway.".to_owned(),
                 Vec::new(),
             )
         } else if external_failed_targets.len() >= 2 {
             (
                 FindingClassification::MultipleExternalTargetsFailed,
                 "Qualifying failures affected multiple configured external targets in the correlation window. This does not establish a shared upstream cause.".to_owned(),
-                "Compare these target results with a configured gateway-role probe and collect another observation period.".to_owned(),
+                "Compare the failure times with a configured gateway-role probe and interface observations; repeat the same targets in another period before drawing broader conclusions.".to_owned(),
                 external_failures
                     .iter()
                     .map(|probe| probe.id.clone())
@@ -253,14 +253,14 @@ fn analyze_one(
             (
             FindingClassification::DnsQueryFailureWithIndependentTcpSuccess,
             "A configured DNS query failed while an independent external TCP target succeeded in the same correlation window. This is DNS-query failure evidence and does not establish that DNS caused the incident or that other destinations are unreachable.".to_owned(),
-            "Check the configured query name and compare DNS results with another independently configured target.".to_owned(),
+            "Confirm the configured FQDN is the intended name, then repeat the DNS observation and compare it with independent external TCP probes. This result describes only that query.".to_owned(),
             dns_failures.iter().map(|(id, _)| id.clone()).collect(),
         )
         } else if !successful_independent_targets.is_empty() && !has_other_target_failure {
             (
                 FindingClassification::EndpointSpecificEvidence,
                 "A different configured external target succeeded while this target had qualifying failures. The evidence is target-specific and does not establish why this endpoint failed.".to_owned(),
-                "Check the affected endpoint and port independently, then compare another probe to the same endpoint if appropriate.".to_owned(),
+                "Verify that the intended service should accept TCP at this IP:port, then compare a fresh probe to it with another configured external target. This narrows the evidence to the endpoint but does not explain the failure.".to_owned(),
                 successful_independent_targets
                     .iter()
                     .map(|probe| probe.id.clone())
@@ -270,7 +270,7 @@ fn analyze_one(
             (
                 FindingClassification::Undetermined,
                 "The stored observations do not distinguish a fault domain for this target-level incident.".to_owned(),
-                "Collect independent gateway and external-target observations during the same period.".to_owned(),
+                "Collect another monitoring period with two distinct external targets and, if useful, an explicitly configured gateway target. Add optional DNS or kernel-journal observations only when those signals are relevant.".to_owned(),
                 Vec::new(),
             )
         };
@@ -436,6 +436,12 @@ mod tests {
             ["fail-1", "fail-2", "carrier-down"]
         );
         assert!(findings[0].explanation.contains("not a diagnosis"));
+        assert!(findings[0]
+            .suggested_follow_up
+            .contains("interface snapshot and counter deltas"));
+        assert!(findings[0]
+            .suggested_follow_up
+            .contains("does not identify a failed component"));
         assert!(findings[0]
             .limitations
             .iter()
@@ -619,6 +625,12 @@ mod tests {
         assert!(findings[0]
             .evidence_event_ids
             .contains(&"target-b-ok".to_owned()));
+        assert!(findings[0]
+            .suggested_follow_up
+            .contains("intended service should accept TCP"));
+        assert!(findings[0]
+            .suggested_follow_up
+            .contains("does not explain the failure"));
     }
 
     #[test]
@@ -665,6 +677,7 @@ mod tests {
                 && finding
                     .explanation
                     .contains("does not establish a shared upstream cause")
+                && finding.suggested_follow_up.contains("another period")
         }));
     }
 
@@ -695,6 +708,9 @@ mod tests {
             FindingClassification::ConfiguredGatewayTargetFailure
         );
         assert!(findings[0].explanation.contains("caller-provided"));
+        assert!(findings[0]
+            .suggested_follow_up
+            .contains("does not verify the active gateway"));
     }
 
     #[test]
@@ -732,6 +748,9 @@ mod tests {
             FindingClassification::Undetermined
         );
         assert_eq!(findings[0].evidence_event_ids, ["fail-1", "fail-2"]);
+        assert!(findings[0]
+            .suggested_follow_up
+            .contains("two distinct external targets"));
     }
 
     #[test]
@@ -858,5 +877,11 @@ mod tests {
         assert!(findings[0]
             .explanation
             .contains("does not establish that DNS caused"));
+        assert!(findings[0]
+            .suggested_follow_up
+            .contains("configured FQDN is the intended name"));
+        assert!(findings[0]
+            .suggested_follow_up
+            .contains("describes only that query"));
     }
 }
