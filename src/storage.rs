@@ -321,15 +321,18 @@ pub fn resolve_database_path(
 }
 
 fn open_database(path: &Path, policy: RetentionPolicy) -> Result<EventStore, StorageError> {
-    match fs::symlink_metadata(path) {
+    let existing = match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => return Err(StorageError::SymlinkPath),
         Ok(metadata) if !metadata.is_file() => return Err(StorageError::InvalidDatabasePath),
         Ok(metadata) if metadata.len() > MAX_DATABASE_SIZE_BYTES => {
             return Err(StorageError::DatabaseTooLarge)
         }
-        Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Ok(_) => true,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(StorageError::Io(error)),
+    };
+    if existing {
+        validate_existing_database(path)?;
     }
     set_private_file_permissions(path)?;
     reject_symlink(path)?;
@@ -340,6 +343,27 @@ fn open_database(path: &Path, policy: RetentionPolicy) -> Result<EventStore, Sto
         | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let connection = Connection::open_with_flags(path, flags)?;
     initialize(connection, policy)
+}
+
+fn validate_existing_database(path: &Path) -> Result<(), StorageError> {
+    reject_symlink(path)?;
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let connection = Connection::open_with_flags(path, flags)?;
+    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version != 0 && version != STORAGE_SCHEMA_VERSION {
+        return Err(StorageError::UnsupportedSchema(version));
+    }
+    let page_size: i64 = connection.pragma_query_value(None, "page_size", |row| row.get(0))?;
+    let page_count: i64 = connection.pragma_query_value(None, "page_count", |row| row.get(0))?;
+    if page_size <= 0 || page_count < 0 {
+        return Err(StorageError::DatabaseTooLarge);
+    }
+    if page_count > (MAX_DATABASE_SIZE_BYTES / page_size as u64) as i64 {
+        return Err(StorageError::DatabaseTooLarge);
+    }
+    Ok(())
 }
 
 fn open_existing_read_only(path: &Path) -> Result<EventStore, StorageError> {
@@ -734,6 +758,29 @@ mod tests {
         assert_eq!(version, 42);
         assert_eq!(marker_exists, 1);
         drop(connection);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsupported_file_schema_keeps_original_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_dir();
+        let path = root.join(DATABASE_FILE_NAME);
+        let connection = Connection::open(&path).unwrap();
+        connection.pragma_update(None, "user_version", 42).unwrap();
+        drop(connection);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(matches!(
+            EventStore::open(&path, RetentionPolicy::default()),
+            Err(StorageError::UnsupportedSchema(42))
+        ));
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

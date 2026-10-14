@@ -208,7 +208,9 @@ Task 0005 implements a local SQLite event store. Its database is
 `$XDG_DATA_HOME/netforensics/events.sqlite3`, or
 `$HOME/.local/share/netforensics/events.sqlite3` when XDG_DATA_HOME is unset.
 The schema is tracked with `PRAGMA user_version`; migration to schema v1 is
-transactional, and unknown versions are rejected. Each row stores insertion
+transactional, and unknown versions are rejected. Existing files are checked
+through a read-only connection before private permissions are applied, so an
+unsupported schema is rejected without changing the file. Each row stores insertion
 sequence, event ID, event schema version, UTC timestamp and Unix milliseconds,
 source, kind, and the full serialized versioned event. Timestamp and kind/time
 indexes support later filtering; sequence is the stable pagination order.

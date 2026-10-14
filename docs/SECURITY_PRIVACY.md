@@ -28,7 +28,7 @@ IPs (especially public IPs), local subnets, interface names, MACs, SSIDs, hostna
 
 ## Retention and storage
 
-SQLite event storage is implemented for monitor observations. It stays at the per-user XDG data location or `$HOME/.local/share/netforensics/events.sqlite3`, is never synced by the application, and uses `0700` directory and `0600` database permissions on Unix. Retention defaults to 30 days or 100000 events, whichever limit is reached first, with a 256 MiB database cap. Stop the monitor and delete `events.sqlite3` to clear stored history. The database contains identifying network metadata such as IP addresses and interface names; handle it as private local data.
+SQLite event storage is implemented for monitor observations. It stays at the per-user XDG data location or `$HOME/.local/share/netforensics/events.sqlite3`, is never synced by the application, and uses `0700` directory and `0600` database permissions on Unix. Existing databases are checked read-only for a supported schema before file permissions are changed; unsupported schema files are left untouched. Retention defaults to 30 days or 100000 events, whichever limit is reached first, with a 256 MiB database cap. Stop the monitor and delete `events.sqlite3` to clear stored history. The database contains identifying network metadata such as IP addresses and interface names; handle it as private local data.
 
 ## Reliability and misuse prevention
 
