@@ -1,6 +1,6 @@
 # Task 0038 — Record detected monitoring gaps
 
-**Status:** Proposed (not assigned)
+**Status:** Complete
 **Milestone:** Future reliability
 **Roadmap item:** Make missing monitoring intervals explicit in event history.
 

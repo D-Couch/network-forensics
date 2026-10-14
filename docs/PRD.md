@@ -66,7 +66,7 @@ Task 0009 provides a pure API for deterministic replay of strict, versioned JSON
 
 ### FR-09 Operational behavior
 
-Gracefully handle SIGINT/shutdown; bound memory and queues; persist without blocking probe collection indefinitely; state monitoring gaps when system sleep, clock adjustments, permission failures, or unavailable signals occur.
+Gracefully handle SIGINT/shutdown; bound memory and queues; persist without blocking probe collection indefinitely; state monitoring gaps when collection timing shows a gap, while preserving uncertainty about its cause. Task 0038 records inter-round gaps using Linux `CLOCK_BOOTTIME`, which includes suspend time and ignores wall-clock adjustments; it does not claim a gap was caused by sleep or a network failure. If the elapsed clock is unavailable or inconsistent, no gap is inferred.
 
 ## 6. Nonfunctional requirements
 

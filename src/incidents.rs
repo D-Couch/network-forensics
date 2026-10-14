@@ -174,6 +174,17 @@ pub fn analyze_events(
             ));
         }
 
+        if matches!(&stored.event.kind, EventKind::MonitoringGap { .. }) {
+            for state in states.values_mut() {
+                state.pending_failures.clear();
+                state.recovery_streak.clear();
+                if let Some(incident) = state.active.as_mut() {
+                    incident.contains_observation_gap = true;
+                }
+            }
+            continue;
+        }
+
         let EventKind::ProbeResult {
             role,
             target,
@@ -334,6 +345,23 @@ mod tests {
                     started_at_utc: at,
                     elapsed_ms: 5,
                     outcome,
+                },
+            },
+        }
+    }
+
+    fn stored_gap(sequence: i64, id: &str, at: &str, elapsed_ms: Option<u64>) -> StoredEvent {
+        let at = at.parse().unwrap();
+        StoredEvent {
+            sequence,
+            event: Event {
+                schema_version: crate::event::SCHEMA_VERSION,
+                id: id.to_owned(),
+                recorded_at_utc: at,
+                source: "monitor".to_owned(),
+                kind: EventKind::MonitoringGap {
+                    gap_started_at_utc: at - chrono::Duration::seconds(20),
+                    elapsed_ms,
                 },
             },
         }
@@ -603,6 +631,76 @@ mod tests {
         let incident = &analyze_events(&clock_events, IncidentConfig::default()).unwrap()[0];
         assert!(incident.contains_clock_adjustment);
         assert_eq!(incident.status, IncidentStatus::Recovered);
+    }
+
+    #[test]
+    fn explicit_gap_resets_failure_and_recovery_streaks_and_marks_open_incident() {
+        let pending_gap_events = [
+            stored(
+                1,
+                "pending-failure",
+                "2026-10-13T00:00:00Z",
+                "192.0.2.1:443",
+                ProbeOutcome::Timeout,
+            ),
+            stored_gap(2, "gap-1", "2026-10-13T00:00:11Z", Some(11_000)),
+            stored(
+                3,
+                "failure-after-gap",
+                "2026-10-13T00:00:12Z",
+                "192.0.2.1:443",
+                ProbeOutcome::Timeout,
+            ),
+        ];
+        assert!(
+            analyze_events(&pending_gap_events, IncidentConfig::default())
+                .unwrap()
+                .is_empty()
+        );
+
+        let open_gap_events = [
+            stored(
+                1,
+                "fail-1",
+                "2026-10-13T00:00:00Z",
+                "192.0.2.1:443",
+                ProbeOutcome::Timeout,
+            ),
+            stored(
+                2,
+                "fail-2",
+                "2026-10-13T00:00:10Z",
+                "192.0.2.1:443",
+                ProbeOutcome::Timeout,
+            ),
+            stored(
+                3,
+                "recover-1",
+                "2026-10-13T00:00:20Z",
+                "192.0.2.1:443",
+                ProbeOutcome::Success,
+            ),
+            stored_gap(4, "gap-unknown-duration", "2026-10-13T00:00:31Z", None),
+            stored(
+                5,
+                "recover-2",
+                "2026-10-13T00:00:32Z",
+                "192.0.2.1:443",
+                ProbeOutcome::Success,
+            ),
+            stored(
+                6,
+                "recover-3",
+                "2026-10-13T00:00:42Z",
+                "192.0.2.1:443",
+                ProbeOutcome::Success,
+            ),
+        ];
+        let incidents = analyze_events(&open_gap_events, IncidentConfig::default()).unwrap();
+        assert_eq!(incidents.len(), 1);
+        assert_eq!(incidents[0].status, IncidentStatus::Recovered);
+        assert!(incidents[0].contains_observation_gap);
+        assert_eq!(incidents[0].recovery_event_ids, ["recover-2", "recover-3"]);
     }
 
     #[test]

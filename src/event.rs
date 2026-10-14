@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::net::SocketAddr;
 
-pub const SCHEMA_VERSION: u16 = 4;
+pub const SCHEMA_VERSION: u16 = 5;
 pub const MIN_SUPPORTED_SCHEMA_VERSION: u16 = 1;
 
 pub const fn supports_schema_version(version: u16) -> bool {
@@ -35,6 +35,12 @@ pub enum EventKind {
     KernelLinkSignal {
         category: KernelLinkSignalCategory,
         interface: Option<String>,
+    },
+    MonitoringGap {
+        /// Wall-clock time when the preceding collection cycle completed.
+        gap_started_at_utc: DateTime<Utc>,
+        /// Elapsed gap length, omitted when it exceeds the supported bound.
+        elapsed_ms: Option<u64>,
     },
     ProbeResult {
         role: ProbeRole,
@@ -202,31 +208,76 @@ mod tests {
     fn round_trips_stable_json_shape() {
         let original = event(Some(false));
         let json = original.to_json().unwrap();
-        assert!(json.contains("\"schema_version\": 4"));
+        assert!(json.contains(&format!("\"schema_version\": {SCHEMA_VERSION}")));
         assert!(json.contains("\"type\": \"link_state_changed\""));
         assert_eq!(Event::from_json(&json).unwrap(), original);
     }
 
     #[test]
     fn rejects_incompatible_schema_version() {
-        let json = event(Some(true))
-            .to_json()
-            .unwrap()
-            .replace("\"schema_version\": 4", "\"schema_version\": 5");
+        let json = event(Some(true)).to_json().unwrap().replace(
+            &format!("\"schema_version\": {SCHEMA_VERSION}"),
+            &format!("\"schema_version\": {}", SCHEMA_VERSION + 1),
+        );
         assert!(Event::from_json(&json)
             .unwrap_err()
             .to_string()
             .to_string()
-            .contains("unsupported schema_version 5"));
+            .contains(&format!(
+                "unsupported schema_version {}",
+                SCHEMA_VERSION + 1
+            )));
     }
 
     #[test]
     fn continues_to_read_schema_v1_events() {
-        let json = event(Some(true))
-            .to_json()
-            .unwrap()
-            .replace("\"schema_version\": 4", "\"schema_version\": 1");
+        let json = event(Some(true)).to_json().unwrap().replace(
+            &format!("\"schema_version\": {SCHEMA_VERSION}"),
+            "\"schema_version\": 1",
+        );
         assert_eq!(Event::from_json(&json).unwrap().schema_version, 1);
+    }
+
+    #[test]
+    fn reads_schema_v4_event_after_schema_bump() {
+        let json = event(Some(true)).to_json().unwrap().replace(
+            &format!("\"schema_version\": {SCHEMA_VERSION}"),
+            "\"schema_version\": 4",
+        );
+        assert_eq!(Event::from_json(&json).unwrap().schema_version, 4);
+    }
+
+    #[test]
+    fn monitoring_gap_round_trips_known_and_unknown_elapsed_time() {
+        let event = Event {
+            schema_version: SCHEMA_VERSION,
+            id: "gap-1".into(),
+            recorded_at_utc: "2026-10-14T12:00:00Z".parse().unwrap(),
+            source: "monitor".into(),
+            kind: EventKind::MonitoringGap {
+                gap_started_at_utc: "2026-10-14T11:59:40Z".parse().unwrap(),
+                elapsed_ms: Some(20_000),
+            },
+        };
+        let json = event.to_json().unwrap();
+        assert_eq!(Event::from_json(&json).unwrap(), event);
+        let EventKind::MonitoringGap {
+            gap_started_at_utc, ..
+        } = event.kind.clone()
+        else {
+            unreachable!();
+        };
+        let unknown = Event {
+            kind: EventKind::MonitoringGap {
+                gap_started_at_utc,
+                elapsed_ms: None,
+            },
+            ..event
+        };
+        assert_eq!(
+            Event::from_json(&unknown.to_json().unwrap()).unwrap(),
+            unknown
+        );
     }
 
     #[test]

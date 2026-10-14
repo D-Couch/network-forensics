@@ -466,6 +466,7 @@ fn event_kind_name(kind: &EventKind) -> &'static str {
         EventKind::ProbeResult { .. } => "probe_result",
         EventKind::InterfaceSnapshot { .. } => "interface_snapshot",
         EventKind::DnsResult { .. } => "dns_result",
+        EventKind::MonitoringGap { .. } => "monitoring_gap",
     }
 }
 
@@ -558,6 +559,44 @@ mod tests {
                 outcome: ProbeOutcome::Success,
             },
         }
+    }
+
+    #[test]
+    fn monitoring_gap_persists_in_insertion_order_with_other_observations() {
+        let mut store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
+        let gap_at = "2026-10-14T12:00:10Z".parse().unwrap();
+        let gap = Event {
+            schema_version: SCHEMA_VERSION,
+            id: "gap-1".into(),
+            recorded_at_utc: gap_at,
+            source: "monitor".into(),
+            kind: EventKind::MonitoringGap {
+                gap_started_at_utc: "2026-10-14T12:00:00Z".parse().unwrap(),
+                elapsed_ms: Some(10_000),
+            },
+        };
+        store
+            .store_events_at(
+                &[gap, event("probe-after-gap", "2026-10-14T12:00:10Z")],
+                gap_at,
+            )
+            .unwrap();
+
+        let stored = store.read_events_after(0, 10).unwrap();
+        assert_eq!(stored.len(), 2);
+        assert_eq!(stored[0].sequence, 1);
+        assert!(matches!(
+            stored[0].event.kind,
+            EventKind::MonitoringGap {
+                elapsed_ms: Some(10_000),
+                ..
+            }
+        ));
+        assert_eq!(stored[1].sequence, 2);
+        assert!(matches!(
+            stored[1].event.kind,
+            EventKind::ProbeResult { .. }
+        ));
     }
 
     #[test]

@@ -14,4 +14,4 @@ hickory-resolver = { version = "0.26.3", default-features = false, features = ["
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.31.3", features = ["fs"] }
+nix = { version = "0.31.3", features = ["fs", "time"] }

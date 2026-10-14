@@ -238,9 +238,33 @@ mod tests {
             Err(ReplayError::DuplicateEventId)
         ));
         assert!(matches!(
-            replay_json(&valid.replace("\"schema_version\": 1", "\"schema_version\": 5")),
+            replay_json(&valid.replace("\"schema_version\": 1", "\"schema_version\": 6")),
             Err(ReplayError::Json(_))
         ));
+    }
+
+    #[test]
+    fn replays_monitoring_gap_and_marks_open_incident_uncertain() {
+        let fixture = r#"{
+            "fixture_schema_version": 1,
+            "events": [
+                {"sequence": 1, "event": {"schema_version": 5, "id": "fail-1", "recorded_at_utc": "2026-10-14T12:00:00Z", "source": "probe", "kind": {"type": "probe_result", "role": "external", "target": "192.0.2.1:443", "method": "tcp_connect", "started_at_utc": "2026-10-14T12:00:00Z", "elapsed_ms": 10, "outcome": {"type": "timeout"}}}},
+                {"sequence": 2, "event": {"schema_version": 5, "id": "fail-2", "recorded_at_utc": "2026-10-14T12:00:10Z", "source": "probe", "kind": {"type": "probe_result", "role": "external", "target": "192.0.2.1:443", "method": "tcp_connect", "started_at_utc": "2026-10-14T12:00:10Z", "elapsed_ms": 10, "outcome": {"type": "timeout"}}}},
+                {"sequence": 3, "event": {"schema_version": 5, "id": "gap-1", "recorded_at_utc": "2026-10-14T12:01:00Z", "source": "monitor", "kind": {"type": "monitoring_gap", "gap_started_at_utc": "2026-10-14T12:00:20Z", "elapsed_ms": 40000}}}
+            ]
+        }"#;
+        let result = replay_json(fixture).unwrap();
+        assert_eq!(result.incidents.len(), 1);
+        assert!(result.incidents[0].contains_observation_gap);
+        assert_eq!(
+            result.incidents[0].status,
+            crate::incidents::IncidentStatus::Open
+        );
+        assert_eq!(result.findings.len(), 1);
+        assert!(result.findings[0]
+            .limitations
+            .iter()
+            .any(|limitation| limitation.contains("continuous conditions are unknown")));
     }
 
     #[test]

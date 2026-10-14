@@ -71,6 +71,12 @@ lifecycle tests use temporary files to check Linux locks, active/stopped state,
 configuration validation, symlinks, and private permissions. These tests must
 not open the default database or access the network.
 
+Event schema tests cover the monitoring-gap variant, bounded/unknown elapsed
+durations, and continued deserialization of schema-v1 through schema-v4 events.
+Monitor gap-detector tests inject elapsed-clock readings for ordinary intervals,
+extended gaps, backwards wall-clock changes, unavailable readings, and
+backwards elapsed readings. They must not sleep or read the host clock.
+
 The event store tests use in-memory SQLite or temporary files. They cover
 schema migration and rejection, durable reopen and sequence paging, atomic
 rollback, age/count retention including the incoming-event cutoff boundary,

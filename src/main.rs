@@ -310,7 +310,9 @@ fn load_status(store: &EventStore) -> Result<StatusSummary, StorageError> {
                 EventKind::InterfaceCounterDelta { .. } => summary.latest_counters = Some(stored),
                 EventKind::DnsResult { .. } => summary.latest_dns = Some(stored),
                 EventKind::KernelLinkSignal { .. } => summary.latest_kernel_signal = Some(stored),
-                EventKind::LinkStateChanged { .. } | EventKind::LinkSpeedChanged { .. } => {}
+                EventKind::LinkStateChanged { .. }
+                | EventKind::LinkSpeedChanged { .. }
+                | EventKind::MonitoringGap { .. } => {}
             }
         }
     }
