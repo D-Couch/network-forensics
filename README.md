@@ -21,9 +21,10 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   reconstruct every configured target. Missing DNS or kernel events do not
   distinguish disabled collection from unavailable/no matching observations.
 - `netforensics interfaces` lists Linux interfaces, operational state, carrier,
-  reported speed, and the interface on the lowest-metric active default route
-  when available. Missing sysfs/procfs values appear as unavailable. The
-  command reads `/sys/class/net` and `/proc/net/route` only.
+  reported speed, and the interface on the lowest-metric active IPv4 default
+  route when available. IPv6 default routes are not currently considered.
+  Missing sysfs/procfs values appear as unavailable. The command reads
+  `/sys/class/net` and `/proc/net/route` only.
 - `netforensics setup` asks for two external endpoints on distinct IP
   addresses and an optional gateway-role endpoint. It validates the values and
   prints a reviewable monitor command without starting probes. The gateway

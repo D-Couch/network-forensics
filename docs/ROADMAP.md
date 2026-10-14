@@ -47,6 +47,7 @@ events, without persisting derived incident records.
 - [x] **Task 0021 — Incident history filters and comparison:** filter displayed incidents by time/target and compare same-target probes before and after an outage.
 - [x] **Task 0022 — Practical examples and sanitized reports:** provide copyable local workflows and sample report formats.
 - [x] **Task 0024 — Probe target and cadence guidance:** explain target permission, one-attempt sequential rounds, and interval behavior.
+- [x] **Task 0025 — Validate IPv4 default-route netmask:** ignore zero-destination routes whose netmask is not zero.
 
 **M4 exit:** An unrelated Linux user can install, monitor, investigate a problem, and share a sanitized report with documented limitations.
 

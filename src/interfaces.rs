@@ -78,7 +78,7 @@ pub struct Discovery {
 }
 
 /// Discovers all interfaces visible under `/sys/class/net` and the active
-/// default route listed in `/proc/net/route`.
+/// IPv4 default route listed in `/proc/net/route`.
 pub fn discover() -> io::Result<Discovery> {
     discover_at(Path::new("/sys/class/net"), Path::new("/proc/net/route"))
 }
@@ -151,8 +151,10 @@ fn parse_default_route(contents: &str) -> Option<String> {
             let _ref_count = fields.next()?;
             let _use_count = fields.next()?;
             let metric = fields.next()?.parse::<u32>().ok()?;
+            let mask = fields.next()?;
 
-            (destination == "00000000" && flags & 1 != 0).then_some((metric, interface))
+            (destination == "00000000" && mask == "00000000" && flags & 1 != 0)
+                .then_some((metric, interface))
         })
         .min_by(|(left_metric, left_iface), (right_metric, right_iface)| {
             left_metric
@@ -206,6 +208,24 @@ mod tests {
             parse_default_route("Iface Destination Gateway Flags\neth0 broken"),
             None
         );
+    }
+
+    #[test]
+    fn ignores_zero_destination_routes_with_nonzero_masks() {
+        let routes = [
+            "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT",
+            "split-default 00000000 0100000A 0001 0 0 1 80000000 0 0 0",
+            "default 00000000 0100000A 0001 0 0 20 00000000 0 0 0",
+        ]
+        .join("\n");
+        assert_eq!(parse_default_route(&routes).as_deref(), Some("default"));
+
+        let only_split_default = [
+            "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT",
+            "split-default 00000000 0100000A 0001 0 0 1 80000000 0 0 0",
+        ]
+        .join("\n");
+        assert_eq!(parse_default_route(&only_split_default), None);
     }
 
     #[test]
