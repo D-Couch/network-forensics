@@ -58,11 +58,12 @@ Each cycle is committed transactionally before its JSON Lines output is
 written. A storage error stops monitoring with an error. Stop the monitor
 before deleting the database file to clear history.
 
-## Planned capabilities
+## Future work
 
-- Additional interface evidence rules.
-
-These are **planned features**, not currently implemented. Derived incident persistence and report file export remain planned.
+The [`docs/ROADMAP.md`](docs/ROADMAP.md) is the single inventory of proposed
+capabilities and release work. Items there are not implemented unless marked
+complete, and they are not implementation assignments until a scoped task is
+added under `tasks/`.
 
 ## Safety and privacy
 
