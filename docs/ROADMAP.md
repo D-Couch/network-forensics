@@ -56,20 +56,20 @@ events, without persisting derived incident records.
 
 ## Planned capabilities and release work
 
-This section is the project’s single inventory of unimplemented product capabilities and release work. The PRD and architecture describe intended behavior and design constraints; use this list for their current planning status. Items here are proposals, not assigned implementation tasks. Create a scoped task under `tasks/` before implementation.
+This section is the project’s single inventory of unimplemented product capabilities and release work. The PRD and architecture describe intended behavior and design constraints; use this list for their current planning status. Items here are proposals, not assigned implementation tasks. Their proposal task files capture the question and boundaries; selecting a proposal for implementation requires a separately assigned, sufficiently scoped task.
 
 ### Usability
 
-- Extend `status` with active-process and complete monitor-configuration awareness only if a later task explicitly adds safe lifecycle/configuration persistence.
+- Extend `status` with active-process and complete monitor-configuration awareness only if a later task explicitly adds safe lifecycle/configuration persistence. ([Task 0029](../tasks/0029-status-lifecycle-configuration.md))
 - Prebuilt binaries and package repositories are out of scope; users build from source using the README instructions.
 
 ### Core capability and reliability
 
-- Consider persistence of derived incidents and file export for reports.
-- Harden bounded queues and backpressure, retention and size limits, privilege checks, suspend/resume gap reporting, and privacy-safe exports.
-- Add further interface evidence rules and richer route-change diagnostics.
-- Consider Wi-Fi and VPN-specific correlation and comparative multi-interface incidents.
-- Resolve remaining interface-selection edge cases when defining their implementation tasks.
+- Consider persistence of derived incidents and file export for reports. ([Task 0030](../tasks/0030-derived-incident-persistence-and-export.md))
+- Harden bounded queues and backpressure, retention and size limits, privilege checks, suspend/resume gap reporting, and privacy-safe exports. ([Task 0031](../tasks/0031-reliability-hardening.md))
+- Add further interface evidence rules and richer route-change diagnostics. ([Task 0032](../tasks/0032-interface-and-route-evidence.md))
+- Consider Wi-Fi and VPN-specific correlation and comparative multi-interface incidents. ([Task 0033](../tasks/0033-wifi-vpn-and-multi-interface-correlation.md))
+- Resolve remaining interface-selection edge cases when defining their implementation tasks. ([Task 0034](../tasks/0034-interface-selection-edge-cases.md))
 
 ### Release preparation
 
@@ -77,8 +77,9 @@ This section is the project’s single inventory of unimplemented product capabi
 
 ### Separate proposals
 
-- A local dashboard may be considered if it materially improves incident review.
-- Cross-platform support and automated remediation require separate proposals.
+- A local dashboard may be considered if it materially improves incident review. ([Task 0035](../tasks/0035-local-dashboard-proposal.md))
+- Cross-platform support requires a separate proposal. ([Task 0036](../tasks/0036-cross-platform-support-proposal.md))
+- Automated remediation requires a separate proposal. ([Task 0037](../tasks/0037-automated-remediation-policy-proposal.md))
 
 ## Release discipline
 
