@@ -1,21 +1,27 @@
-# Task 0029 — Status lifecycle and configuration proposal
+# Task 0029 — Status lifecycle and configuration
 
-**Status:** Proposed (not assigned)
-**Milestone:** Future
+**Status:** Complete
+**Milestone:** M4
 **Roadmap item:** Extend `status` with active-process and complete monitor-configuration awareness.
 
-## Scope
+## Decisions
 
-Define a safe, local mechanism for `status` to report whether a monitor process is active and which configuration it is using. The proposal must account for stale process records, concurrent monitors, process identity reuse, configuration privacy, and cleanup after normal or interrupted shutdown.
+- Use a Linux advisory exclusive file lock as the live-process signal. The kernel releases the lock after normal shutdown or process termination, avoiding stale PID and PID-reuse checks.
+- Store a versioned JSON configuration record beside the event database in the existing per-user data directory. Keep the directory at `0700` and the record at `0600` on Linux.
+- Reject a second monitor while the lock is held. Do not add a background service, event schema change, or database write for status metadata.
+- Validate records before displaying them. Show an inactive record as the last configuration, which may be stale; show unknown/unavailable state when the record cannot be trusted.
+- Keep the DNS name in the private record so the configuration is complete, but omit its value from status output.
 
-## Acceptance criteria for a future implementation task
+## Acceptance criteria
 
-- Specify a lifecycle/configuration record format, ownership and permissions, locking behavior, stale-state handling, and shutdown cleanup.
-- Report only validated configuration and clearly distinguish unavailable or stale state from an active monitor.
-- Do not persist probe secrets or imply that a process record proves probes are succeeding.
-- Add deterministic tests for active, stale, malformed, concurrent, and unavailable state.
-- Document platform assumptions and privacy implications before implementation is assigned.
+- `status` reports an active monitor from its held Linux advisory lock and shows its validated intervals, targets, retention, and optional collection settings.
+- When no monitor holds the lock, `status` labels a valid saved record as last-run configuration and does not claim that monitoring is active.
+- A malformed or unsafe record is not trusted, symlinks are not followed, and DNS query names are omitted from status output.
+- Concurrent monitor startup is rejected; the lock is released automatically after shutdown or process exit.
+- Deterministic tests cover active/stopped states, concurrent locking, malformed records, symlinks, and DNS-name redaction.
+- README, architecture, PRD, and privacy documentation describe the behavior and its Linux-only assumptions.
+- Run standard Cargo checks.
 
 ## Boundary
 
-This proposal adds no background service and does not change current monitor behavior. Implementation requires a separately assigned task after the lifecycle design is reviewed.
+The status lock is Linux-specific. It does not prove that probes are succeeding, and the last configuration may no longer reflect current settings. The monitor remains foreground-only.

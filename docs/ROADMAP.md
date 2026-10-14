@@ -40,7 +40,7 @@ events, without persisting derived incident records.
 - [x] **Task 0014 — Kernel link analysis:** allow correlated link-down/watchdog observations to support existing local-link evidence.
 - [x] **Task 0015 — Linux CI:** run formatting, tests, Clippy, and build on pushes and pull requests.
 - [x] **Task 0016 — First-run CLI guide:** explain a safe local-first path through the existing commands and the effects of monitoring.
-- [x] **Task 0017 — Read-only status:** summarize retained observations and explicit unknowns without claiming live monitor state or reconstructing unstored configuration.
+- [x] **Task 0017 — Read-only status:** summarize retained observations and explicit unknowns without inferring monitor state from event history; Task 0029 adds separate lifecycle/configuration tracking.
 - [x] **Task 0018 — Finding-specific follow-up guidance:** provide actionable checks tied to existing evidence without adding causal claims.
 - [x] **Task 0019 — Offline replay command:** run a strict versioned fixture through the existing analysis pipeline without network or database access.
 - [x] **Task 0020 — Guided target setup:** validate user-chosen probe endpoints and explain the gateway-role limitation before printing a monitor command.
@@ -51,6 +51,7 @@ events, without persisting derived incident records.
 - [x] **Task 0026 — IPv6 default-route fallback:** discover an active IPv6 default when no usable IPv4 default exists.
 - [x] **Task 0027 — Apply age retention to new events:** discard incoming events older than the configured cutoff.
 - [x] **Task 0028 — Preserve incompatible database files:** inspect existing schema versions read-only before changing file permissions.
+- [x] **Task 0029 — Status lifecycle and configuration:** report a running foreground monitor and its validated configuration through a private Linux advisory lock record.
 
 **M4 exit:** An unrelated Linux user can install, monitor, investigate a problem, and share a sanitized report with documented limitations.
 
@@ -60,7 +61,6 @@ This section is the project’s single inventory of unimplemented product capabi
 
 ### Usability
 
-- Extend `status` with active-process and complete monitor-configuration awareness only if a later task explicitly adds safe lifecycle/configuration persistence. ([Task 0029](../tasks/0029-status-lifecycle-configuration.md))
 - Prebuilt binaries and package repositories are out of scope; users build from source using the README instructions.
 
 ### Core capability and reliability

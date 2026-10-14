@@ -22,6 +22,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 ## 2. Modules (logical, not mandatory crates)
 
 - `main.rs`: current command parsing and user-facing output, including read-only `status` and interactive target `setup`; setup prints a command but does not start monitoring.
+- `monitor_state`: Linux advisory-lock lifecycle detection and a bounded, validated private monitor-configuration record.
 - `event`: typed, versioned observation events (implemented).
 - `interfaces`: Linux interface state and default-route discovery (implemented).
 - `probes` and `dns`: explicit TCP checks and opt-in system-configured DNS lookups (implemented).
@@ -47,7 +48,13 @@ timestamps for evidence review but omit DNS query names and raw event payloads.
 latest event, probe, interface snapshot/counter sample, and optional DNS and
 normalized kernel-link events. Missing optional events are described as
 absent from retained history; the command does not infer whether collection was
-disabled or unavailable. It performs no network, process, or write operations.
+disabled or unavailable. On Linux, a foreground monitor holds an exclusive
+advisory lock on a `0600` versioned configuration record in the `0700` data
+directory. `status` attempts a nonblocking shared lock to distinguish an active
+monitor from a stopped one. It validates and displays active configuration, or
+labels an unlocked record as the last configuration, which may be stale. The
+record includes the configured DNS name, but status omits the name from output.
+Status performs no network requests, process-table inspection, or writes.
 
 **Implementation rule:** Keep one Cargo package and Rust modules. Extract crates only if justified by dependency separation or actual reuse. Do not scaffold unused modules.
 
@@ -109,8 +116,10 @@ probe events, and optional normalized kernel link signals to stdout, then commit
 SQLite store before printing it. Targets run sequentially; a
 completed round is followed by a configurable pause (10 seconds by default,
 bounded to 1 second–1 hour). Ctrl+C prevents starting additional probes and
-allows the current bounded connect attempt to finish. The `ctrlc` dependency
-provides portable signal handling; the monitor creates no background service.
+allows the current bounded connect attempt to finish. A Linux advisory lock
+prevents a second monitor from starting and is released by the kernel on exit.
+The `ctrlc` dependency provides portable signal handling; the monitor creates
+no background service.
 
 ## 3. Event envelope v4 (reads v1 through v3)
 

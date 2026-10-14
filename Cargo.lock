@@ -687,6 +687,7 @@ dependencies = [
  "chrono",
  "ctrlc",
  "hickory-resolver",
+ "nix",
  "rusqlite",
  "serde",
  "serde_json",

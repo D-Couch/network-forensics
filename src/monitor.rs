@@ -333,6 +333,7 @@ fn persist_then_write<W: Write>(
 /// time out before shutdown; no new probes start after the signal is observed.
 pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
     let mut store = EventStore::open_default(config.retention).map_err(io::Error::other)?;
+    let _monitor_guard = crate::monitor_state::MonitorGuard::acquire_default(&config)?;
     let stop = Arc::new(AtomicBool::new(false));
     let signal_stop = Arc::clone(&stop);
     ctrlc::set_handler(move || signal_stop.store(true, Ordering::Release))
