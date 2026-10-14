@@ -28,7 +28,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents [--since RFC3339] [--until RFC3339] [--target IP:PORT] [--compare]\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n  netforensics replay <FIXTURE.json>\n  netforensics setup\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Filter incidents and compare same-target probes\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n  setup            Guide target selection and print a monitor command\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, replay, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents [--since RFC3339] [--until RFC3339] [--target IP:PORT] [--compare]\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n  netforensics replay <FIXTURE.json>\n  netforensics setup\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Filter incidents and compare same-target probes\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n  setup            Guide target selection and print a monitor command\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms; it is a pause after a completed round, not the per-target probe period. Each configured TCP target is attempted once per round, sequentially, without application retries, so the time between attempts to a target also includes the round duration. Use targets you are permitted to contact and that are expected to accept TCP on the selected port; increase --interval-ms to reduce request frequency and respect target owners' policies. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, replay, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -556,7 +556,8 @@ fn run_replay(path: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 fn run_setup<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> io::Result<()> {
     writeln!(writer, "Guided monitoring setup")?;
-    writeln!(writer, "Choose two distinct external services you may contact and expect to accept TCP on the chosen ports. Enter numeric IP:PORT values; setup makes no network requests.")?;
+    writeln!(writer, "Choose two distinct external services you are permitted to contact and expect to accept TCP on the chosen ports. Enter numeric IP:PORT values; setup makes no network requests.")?;
+    writeln!(writer, "Monitoring attempts each configured TCP target once per round, sequentially, with no application retries. The interval is a pause after a completed round (10 seconds by default), so time between attempts also includes round duration. Increase --interval-ms to reduce request frequency and respect target owners' policies.")?;
     writeln!(writer, "A gateway-role target is optional. It is only a label for the endpoint you enter; it does not verify the active gateway or prove gateway reachability.")?;
 
     let first_external = prompt_target(reader, writer, "First external IP:PORT: ", "external")?;
@@ -1632,6 +1633,8 @@ mod tests {
         run_setup(&mut input, &mut output).unwrap();
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("setup makes no network requests"));
+        assert!(output.contains("once per round, sequentially, with no application retries"));
+        assert!(output.contains("Increase --interval-ms to reduce request frequency"));
         assert!(output.contains("does not verify the active gateway"));
         assert!(output.contains("Choose an external target with a different IP address."));
         assert!(
@@ -1639,6 +1642,13 @@ mod tests {
         );
         assert!(output.contains("netforensics monitor --external '192.0.2.1:443' --external '198.51.100.2:443' --gateway '[2001:db8::1]:443'"));
         assert!(output.contains("setup will not start monitoring"));
+    }
+
+    #[test]
+    fn help_explains_probe_target_policy_and_cadence() {
+        assert!(HELP.contains("not the per-target probe period"));
+        assert!(HELP.contains("increase --interval-ms to reduce request frequency"));
+        assert!(HELP.contains("respect target owners' policies"));
     }
 
     #[test]

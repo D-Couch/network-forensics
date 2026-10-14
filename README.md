@@ -126,12 +126,17 @@ The following is a command template, not a ready-to-run command. Replace both
 cargo run -- monitor --external <IP:PORT> --external <IP:PORT>
 ```
 
-Monitoring makes repeated TCP connection attempts only to the configured
-targets. It does not query DNS unless you add `--dns-name <FQDN>`, and it does
-not read kernel journal entries unless you add `--kernel-journal`. Review the
-data-retention defaults and privacy notes above before starting. Stop with
-Ctrl+C; an in-progress probe may finish within its configured timeout. The
-monitor stores observations in the local database described above.
+Choose endpoints you are permitted to contact and that are expected to accept
+TCP on the selected ports; follow their owners' usage policies. Monitoring
+attempts each configured TCP target once per round, sequentially, without
+application retries. `--interval-ms` is the pause after a completed round
+(10 seconds by default), so the time between attempts to a particular target
+also includes the round duration. Increase the interval to reduce request
+frequency. DNS is queried only when you add `--dns-name <FQDN>`, and the kernel
+journal is read only when you add `--kernel-journal`. Review the data-retention
+defaults and privacy notes above before starting. Stop with Ctrl+C; an
+in-progress probe may finish within its configured timeout. The monitor stores
+observations in the local database described above.
 
 After collecting events, inspect them locally with:
 

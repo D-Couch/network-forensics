@@ -8,7 +8,7 @@ The tool receives data from the local OS, active network probes, optional system
 
 - Collect network *metadata* needed to establish fault domains; never capture packet payloads in the initial product.
 - Do not read credentials, browser histories, cookies, application traffic, or unrelated logs.
-- Active probes must be rate-limited, time-bounded, documented, and user-configurable; avoid treating blocked responses as definitive outages.
+- Active probes must be rate-limited, time-bounded, documented, and user-configurable; avoid treating blocked responses as definitive outages. The monitor attempts each configured TCP target once sequentially per round, then waits the configured interval after that round; users should select permitted targets and lengthen the interval to lower request frequency.
 - The current one-shot probe command connects only to a numeric IP and port supplied directly by the user, applies a bounded timeout, and performs no DNS lookup or retry. It sends no probe unless explicitly invoked.
 - The `setup` command accepts explicit numeric IP:port targets and prints a monitor command for review. It performs no network requests, database access, or automatic target discovery; only running the printed command starts repeated probes.
 - Foreground monitoring applies the same restrictions, requires two distinct external targets, runs them sequentially, and pauses at least one second after each round. Ctrl+C stops new attempts while the current attempt completes within its configured timeout.

@@ -46,6 +46,7 @@ events, without persisting derived incident records.
 - [x] **Task 0020 — Guided target setup:** validate user-chosen probe endpoints and explain the gateway-role limitation before printing a monitor command.
 - [x] **Task 0021 — Incident history filters and comparison:** filter displayed incidents by time/target and compare same-target probes before and after an outage.
 - [x] **Task 0022 — Practical examples and sanitized reports:** provide copyable local workflows and sample report formats.
+- [x] **Task 0024 — Probe target and cadence guidance:** explain target permission, one-attempt sequential rounds, and interval behavior.
 
 **M4 exit:** An unrelated Linux user can install, monitor, investigate a problem, and share a sanitized report with documented limitations.
 
@@ -64,7 +65,7 @@ This section is the project’s single inventory of unimplemented product capabi
 - Harden bounded queues and backpressure, retention and size limits, privilege checks, suspend/resume gap reporting, and privacy-safe exports.
 - Add further interface evidence rules and richer route-change diagnostics.
 - Consider Wi-Fi and VPN-specific correlation and comparative multi-interface incidents.
-- Resolve remaining probe destination/rate guidance and interface-selection edge cases when defining their implementation tasks.
+- Resolve remaining interface-selection edge cases when defining their implementation tasks.
 
 ### Release preparation
 

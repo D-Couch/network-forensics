@@ -38,7 +38,7 @@ The target interface is `netforensics --help`, `--version`, `status`, `setup`, `
 
 ### FR-02 Probe observation
 
-Support a local default-gateway reachability probe and at least two independently configured external reachability targets. For the MVP use an unprivileged probe method (e.g., TCP connect) where appropriate. Distinguish `success`, `failure`, `timeout`, and `unsupported/blocked` rather than equating ICMP failure with Internet outage. DNS lookups must be a separate signal. Task 0010 implements one explicit opt-in `--dns-name` fully qualified query using system nameserver configuration; no lookup occurs without it. Include method, target role, start time, elapsed time, result, and sanitized failure category.
+Support a local default-gateway reachability probe and at least two independently configured external reachability targets. For the MVP use an unprivileged probe method (e.g., TCP connect) where appropriate. Distinguish `success`, `failure`, `timeout`, and `unsupported/blocked` rather than equating ICMP failure with Internet outage. DNS lookups must be a separate signal. Task 0010 implements one explicit opt-in `--dns-name` fully qualified query using system nameserver configuration; no lookup occurs without it. Task 0024 documents that users choose permitted targets and that monitoring attempts configured TCP targets sequentially once per round; the interval is a pause after the round, so the per-target period includes round duration. Include method, target role, start time, elapsed time, result, and sanitized failure category.
 
 ### FR-03 Link/interface observation
 
