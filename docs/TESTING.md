@@ -92,6 +92,10 @@ reject malformed or unknown fields, future schemas, bad ordering, duplicate
 IDs, inputs over 16 MiB, and event counts over 100000. Replay never accesses
 the network or default database.
 
+The `replay` CLI tests use a local temporary fixture and a bounded reader. They
+verify rendered incidents/findings and oversized-input rejection without
+network access or the default event database.
+
 The routine test suite must remain deterministic and must not invoke live probe
 targets. Manual interface inventory can read the host's sysfs/procfs and is
 environment-dependent; it is not a substitute for the fixture-based unit tests.

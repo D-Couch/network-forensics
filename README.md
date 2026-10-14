@@ -53,7 +53,7 @@ interface names, and discards raw text. It uses the current user's journal
 permissions and continues monitoring with a one-time warning when access is
 unavailable. See [ADR 0007](docs/decisions/0007-kernel-journal-link-signals.md).
 
-The replay API accepts strict JSON fixtures with an independent fixture schema version, event insertion sequences, and versioned event objects. It runs the same lifecycle and analysis APIs without networking or database access. Input is limited to 16 MiB and 100,000 events; fixture cases and expected results live under `tests/fixtures/`. There is no user-facing replay command yet.
+`netforensics replay <FIXTURE.json>` runs one strict JSON fixture through the same incident and analysis APIs used by stored history. It reads the supplied file locally, performs no networking or database access, and prints incidents and findings to stdout. Input is limited to 16 MiB and 100,000 events; fixture cases and expected results live under `tests/fixtures/`.
 
 The database is `$XDG_DATA_HOME/netforensics/events.sqlite3`, or
 `$HOME/.local/share/netforensics/events.sqlite3` when XDG_DATA_HOME is unset.

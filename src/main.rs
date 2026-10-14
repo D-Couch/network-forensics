@@ -21,11 +21,13 @@ use crate::storage::{
     EventStore, RetentionPolicy, StorageError, DEFAULT_MAX_EVENTS, DEFAULT_RETENTION_DAYS,
 };
 use std::env;
+use std::fs::File;
+use std::io::{self, Read};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n  netforensics replay <FIXTURE.json>\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, replay, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -58,6 +60,15 @@ fn main() {
         }
         [command, flag] if command == "analyze" && (flag == "--help" || flag == "-h") => {
             print!("{HELP}");
+        }
+        [command, flag] if command == "replay" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
+        }
+        [command, path] if command == "replay" => {
+            if let Err(error) = run_replay(path) {
+                eprintln!("Could not replay fixture: {error}");
+                std::process::exit(1);
+            }
         }
         [command, flag] if command == "report" && (flag == "--help" || flag == "-h") => {
             print!("{HELP}");
@@ -419,6 +430,45 @@ fn run_analyze_latest() -> Result<(), HistoryError> {
     let history = load_analysis(&store)?;
     println!("{}", report::render_analysis(&history.findings));
     Ok(())
+}
+
+fn run_replay(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let input = read_bounded(File::open(path)?, replay::MAX_FIXTURE_BYTES)?;
+    let input = String::from_utf8(input)?;
+    let result = replay::replay_json(&input)?;
+    println!("{}", render_replay(&result));
+    Ok(())
+}
+
+fn read_bounded<R: Read>(reader: R, maximum: usize) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(maximum.min(64 * 1024));
+    reader
+        .take((maximum as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > maximum {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("fixture exceeds the {maximum}-byte limit"),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn render_replay(result: &replay::ReplayResult) -> String {
+    let mut output = String::from("Offline fixture replay\n\nProbe incidents:\n");
+    if result.incidents.is_empty() {
+        output.push_str("No qualifying probe incidents in fixture.\n");
+    } else {
+        output.push_str(&render_incidents(&result.incidents));
+        output.push('\n');
+    }
+    output.push_str("\nFindings:\n");
+    if result.findings.is_empty() {
+        output.push_str("No findings for this fixture.\n");
+    } else {
+        output.push_str(&report::render_analysis(&result.findings));
+    }
+    output
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1088,6 +1138,32 @@ mod tests {
         let output = report::render_analysis(&history.findings);
         assert!(output.contains("undetermined"));
         assert!(output.contains("fail-a, fail-b"));
+    }
+
+    #[test]
+    fn replay_reads_bounded_fixture_and_renders_offline_findings() {
+        let fixture = include_str!("../tests/fixtures/endpoint-specific/events.json");
+        let path = env::temp_dir().join(format!(
+            "netforensics-replay-test-{}-{}.json",
+            std::process::id(),
+            next_event_id()
+        ));
+        std::fs::write(&path, fixture).unwrap();
+        let bytes = read_bounded(File::open(&path).unwrap(), replay::MAX_FIXTURE_BYTES).unwrap();
+        std::fs::remove_file(path).unwrap();
+        let result = replay::replay_json(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        let output = render_replay(&result);
+        assert!(output.contains("Offline fixture replay"));
+        assert!(output.contains("Probe incidents:"));
+        assert!(output.contains("Findings:"));
+        assert!(output.contains("endpoint_specific_evidence"));
+        assert!(output.contains("endpoint-a-fail-1, endpoint-a-fail-2, endpoint-b-success"));
+    }
+
+    #[test]
+    fn replay_file_reader_rejects_input_over_limit_without_reading_it_all() {
+        let error = read_bounded(&b"12345"[..], 4).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]

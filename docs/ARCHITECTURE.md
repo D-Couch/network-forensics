@@ -30,7 +30,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 - `incidents`: deterministic probe-target lifecycle over stored events (Task 0006) and read-only history CLI (Task 0007); see the roadmap for unimplemented capability status.
 - `analysis`: pure evidence-citing rules over stored event types (Tasks 0008/0010/0014), exposed by read-only `analyze --latest`.
 - `report`: pure versioned text/JSON reports, redacted by default (Task 0011); see the roadmap for unimplemented capability status.
-- `replay`: strict bounded JSON fixture replay through incident and analysis APIs (Task 0009); see the roadmap for unimplemented capability status.
+- `replay`: strict bounded JSON fixture replay through incident and analysis APIs (Task 0009), exposed through `replay <FIXTURE.json>` (Task 0019).
 
 ### Current read-only history commands
 
@@ -182,6 +182,11 @@ independent from event schema versioning. Parsing is bounded to 16 MiB and
 100000 events, rejects duplicate event IDs and unknown fields, then invokes the
 same incident and analysis APIs used elsewhere. The function accepts an
 in-memory string and performs no file, database, network, or privileged I/O.
+
+The `replay <FIXTURE.json>` CLI reads one supplied local file with a bounded
+16 MiB read, passes its UTF-8 contents to this API, and prints derived incidents
+and findings. It does not access the event database, network, or privileged
+interfaces, and it does not write output files.
 
 ## 6. Current event storage
 

@@ -34,7 +34,7 @@ Record relevant, timestamped observations; assemble them into coherent incidents
 
 ### FR-01 CLI and configuration
 
-The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, and `report --latest`. The current implementation provides help/version, read-only `status`, `interfaces`, one-shot `probe`, foreground `monitor`, read-only `incidents`, `analyze --latest`, and text/JSON `report --latest`. `status` summarizes retained observations but cannot detect an active foreground monitor or reconstruct the complete monitor configuration. The current status of other unimplemented capabilities is tracked only in the [roadmap](ROADMAP.md). Reports redact configured target addresses by default and require explicit `--include-identifiers` to include them. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
+The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, `report --latest`, and `replay <FIXTURE.json>`. The current implementation provides help/version, read-only `status`, `interfaces`, one-shot `probe`, foreground `monitor`, read-only `incidents`, `analyze --latest`, text/JSON `report --latest`, and offline fixture `replay`. `status` summarizes retained observations but cannot detect an active foreground monitor or reconstruct the complete monitor configuration. The current status of other unimplemented capabilities is tracked only in the [roadmap](ROADMAP.md). Reports redact configured target addresses by default and require explicit `--include-identifiers` to include them. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
 
 ### FR-02 Probe observation
 
@@ -62,7 +62,7 @@ Persist records locally in SQLite, with schema migration strategy, retention opt
 
 ### FR-08 Replay
 
-Task 0009 provides a pure API for deterministic replay of strict, versioned JSON event fixtures through the same incident and analysis logic. Fixture schema version is independent from the event schema; entries carry insertion sequence and must already be ordered. Inputs are limited to 16 MiB and 100000 events, and duplicate IDs, unknown fields, unsupported versions, and invalid sequences are rejected. This API performs no file, database, network, or privileged operations. The roadmap tracks the possible user-facing replay command.
+Task 0009 provides a pure API for deterministic replay of strict, versioned JSON event fixtures through the same incident and analysis logic. Task 0019 adds `netforensics replay <FIXTURE.json>`, which reads one local file with a 16 MiB cap and prints derived incidents and findings. Fixture schema version is independent from the event schema; entries carry insertion sequence and must already be ordered. Inputs are limited to 16 MiB and 100000 events, and duplicate IDs, unknown fields, unsupported versions, and invalid sequences are rejected. Replay performs no networking, database access, or privileged operations.
 
 ### FR-09 Operational behavior
 
