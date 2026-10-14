@@ -19,6 +19,9 @@ pub const DEFAULT_INTERVAL_MILLIS: u64 = 10_000;
 pub const MIN_INTERVAL_MILLIS: u64 = 1_000;
 pub const MAX_INTERVAL_MILLIS: u64 = 3_600_000;
 pub const MAX_TARGETS: usize = 8;
+/// Leaves room in the 4096-event storage batch for up to four events per
+/// interface, all configured probes, one DNS result, and bounded journal data.
+pub const MAX_INTERFACES_PER_CYCLE: usize = 900;
 
 #[derive(Debug, Default)]
 pub struct InterfaceTracker {
@@ -232,12 +235,20 @@ pub fn collect_cycle<T, C, F>(
     stop: &AtomicBool,
     cycle_time: DateTime<Utc>,
     mut next_id: F,
-) -> Vec<Event>
+) -> io::Result<Vec<Event>>
 where
     T: ProbeTransport,
     C: ProbeClock,
     F: FnMut() -> String,
 {
+    if discovery.interfaces.len() > MAX_INTERFACES_PER_CYCLE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "interface inventory exceeds the per-cycle limit of {MAX_INTERFACES_PER_CYCLE}; refusing to truncate observations"
+            ),
+        ));
+    }
     let mut events = tracker.observe(discovery, cycle_time, &mut next_id);
     events.reserve(config.targets.len());
 
@@ -247,7 +258,7 @@ where
         }
         events.push(runner.run(next_id(), *target, config.probe));
     }
-    events
+    Ok(events)
 }
 
 pub fn collect_cycle_with_dns<T, C, D, E, F>(
@@ -257,7 +268,7 @@ pub fn collect_cycle_with_dns<T, C, D, E, F>(
     dns_runner: &mut DnsRunner<D, E>,
     cycle: CycleInput<'_>,
     mut next_id: F,
-) -> Vec<Event>
+) -> io::Result<Vec<Event>>
 where
     T: ProbeTransport,
     C: ProbeClock,
@@ -273,13 +284,13 @@ where
         cycle.stop,
         cycle.recorded_at,
         &mut next_id,
-    );
+    )?;
     if !cycle.stop.load(Ordering::Acquire) {
         if let Some(name) = &config.dns_name {
             events.push(dns_runner.run(next_id(), name, config.probe.timeout()));
         }
     }
-    events
+    Ok(events)
 }
 
 pub struct CycleInput<'a> {
@@ -379,7 +390,7 @@ pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
                     recorded_at: cycle_time,
                 },
                 crate::next_event_id,
-            )
+            )?
         } else {
             collect_cycle(
                 &discovery,
@@ -389,7 +400,7 @@ pub fn run_foreground(config: MonitorConfig) -> io::Result<()> {
                 &stop,
                 cycle_time,
                 crate::next_event_id,
-            )
+            )?
         };
         if let Some(collector) = &mut journal_collector {
             if let Some(error) = append_journal_events(
@@ -561,7 +572,8 @@ mod tests {
                 ids += 1;
                 format!("test-{ids}")
             },
-        );
+        )
+        .unwrap();
         let mut output = Vec::new();
         for event in &events {
             write_event(&mut output, event).unwrap();
@@ -637,7 +649,8 @@ mod tests {
                 recorded_at: "2026-10-13T00:00:00Z".parse().unwrap(),
             },
             || "id".to_owned(),
-        );
+        )
+        .unwrap();
         assert!(matches!(
             events.last().unwrap().kind,
             EventKind::DnsResult { elapsed_ms: 7, .. }
@@ -649,6 +662,127 @@ mod tests {
         assert!(events[..events.len() - 1]
             .iter()
             .all(|event| !matches!(event.kind, EventKind::DnsResult { .. })));
+    }
+
+    #[test]
+    fn maximum_interface_inventory_keeps_the_cycle_under_the_storage_batch_limit() {
+        let mut tracker = InterfaceTracker::default();
+        let mut runner = ProbeRunner::new(
+            FakeTransport {
+                calls: Rc::new(Cell::new(0)),
+            },
+            FakeClock {
+                monotonic: RefCell::new(VecDeque::new()),
+            },
+        );
+        let config = MonitorConfig::new(
+            DEFAULT_INTERVAL_MILLIS,
+            crate::probes::DEFAULT_TIMEOUT_MILLIS,
+            vec![target("192.0.2.1"), target("192.0.2.2")],
+        )
+        .unwrap();
+        let stop = AtomicBool::new(true);
+        let at = "2026-10-13T00:00:00Z".parse().unwrap();
+        let make_discovery = |carrier, speed_mbps| Discovery {
+            interfaces: (0..MAX_INTERFACES_PER_CYCLE)
+                .map(|index| InterfaceState {
+                    name: format!("test{index}"),
+                    operational_state: OperationalState::Unknown,
+                    carrier: Some(carrier),
+                    speed_mbps: Some(speed_mbps),
+                    is_default_route: false,
+                    counters: Default::default(),
+                })
+                .collect(),
+            default_route: None,
+        };
+        let mut ids = 0;
+        let baseline = collect_cycle(
+            &make_discovery(false, 100),
+            &config,
+            &mut tracker,
+            &mut runner,
+            &stop,
+            at,
+            || {
+                ids += 1;
+                format!("test-{ids}")
+            },
+        )
+        .unwrap();
+        assert_eq!(baseline.len(), MAX_INTERFACES_PER_CYCLE * 2);
+
+        let changed = collect_cycle(
+            &make_discovery(true, 1000),
+            &config,
+            &mut tracker,
+            &mut runner,
+            &stop,
+            at,
+            || {
+                ids += 1;
+                format!("test-{ids}")
+            },
+        )
+        .unwrap();
+        assert_eq!(changed.len(), MAX_INTERFACES_PER_CYCLE * 4);
+        assert!(
+            changed.len() + MAX_TARGETS + 1 + crate::journal::MAX_ENTRIES
+                <= crate::storage::MAX_WRITE_BATCH_SIZE
+        );
+    }
+
+    #[test]
+    fn oversized_interface_inventory_fails_before_creating_events_or_probing() {
+        let calls = Rc::new(Cell::new(0));
+        let mut runner = ProbeRunner::new(
+            FakeTransport {
+                calls: Rc::clone(&calls),
+            },
+            FakeClock {
+                monotonic: RefCell::new(VecDeque::new()),
+            },
+        );
+        let config = MonitorConfig::new(
+            DEFAULT_INTERVAL_MILLIS,
+            crate::probes::DEFAULT_TIMEOUT_MILLIS,
+            vec![target("192.0.2.1"), target("192.0.2.2")],
+        )
+        .unwrap();
+        let mut oversized = discovery();
+        oversized.interfaces = (0..=MAX_INTERFACES_PER_CYCLE)
+            .map(|index| InterfaceState {
+                name: format!("test{index}"),
+                operational_state: OperationalState::Unknown,
+                carrier: None,
+                speed_mbps: None,
+                is_default_route: false,
+                counters: Default::default(),
+            })
+            .collect();
+        let mut tracker = InterfaceTracker::default();
+        let mut generated_ids = 0;
+        let error = collect_cycle(
+            &oversized,
+            &config,
+            &mut tracker,
+            &mut runner,
+            &AtomicBool::new(false),
+            "2026-10-13T00:00:00Z".parse().unwrap(),
+            || {
+                generated_ids += 1;
+                format!("test-{generated_ids}")
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error
+            .to_string()
+            .contains("refusing to truncate observations"));
+        assert_eq!(generated_ids, 0);
+        assert!(tracker.previous.is_empty());
+        assert_eq!(calls.get(), 0);
     }
 
     #[test]

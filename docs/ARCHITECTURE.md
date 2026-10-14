@@ -239,11 +239,13 @@ the database limit is 256 MiB. Configuration ranges and limits are described
 in the README and enforced by the CLI/storage API. Reads are paged by sequence,
 up to 1000 events per request. Write batches are capped at 4096 events. Storage
 failures stop the monitor before that cycle is emitted to stdout. Configured
-probes are capped, but interface observations are accumulated before storage
-validates the batch; [Task 0039](../tasks/0039-bound-monitor-cycle-events.md)
-tracks adding a collection-time bound. Database writes are synchronous in the
-foreground monitor, so slow storage can delay later sampling; there is no
-asynchronous queue or backlog.
+probes are capped, and monitor collection rejects inventories above 900
+interfaces before generating cycle events. At most four events per interface,
+eight probes, one DNS event, and 100 journal events fit below the 4096-event
+storage batch limit. The monitor fails that cycle with a clear error rather
+than silently truncating interface observations. Database writes are
+synchronous in the foreground monitor, so slow storage can delay later
+sampling; there is no asynchronous queue or backlog.
 
 See [ADR 0001](decisions/0001-local-event-storage.md) for the payload/index
 trade-off and dependency choice, and [ADR 0002](decisions/0002-probe-incident-lifecycle.md)

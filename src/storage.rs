@@ -15,7 +15,7 @@ const STORAGE_SCHEMA_VERSION: i64 = 1;
 const DATABASE_FILE_NAME: &str = "events.sqlite3";
 const MAX_DATABASE_SIZE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_READ_PAGE_SIZE: usize = 1_000;
-const MAX_WRITE_BATCH_SIZE: usize = 4_096;
+pub(crate) const MAX_WRITE_BATCH_SIZE: usize = 4_096;
 const MILLIS_PER_DAY: i64 = 86_400_000;
 
 pub const DEFAULT_RETENTION_DAYS: u32 = 30;

@@ -42,8 +42,10 @@ source-prefix, up/reject flags, metrics and deterministic tie breaking, and
 IPv4-first preference with IPv6 fallback when the IPv4 route is rejected.
 Tracker tests cover baseline and per-field
 deltas, partial unknown values, counter decreases, disappearing/reappearing
-interfaces, carrier and speed transitions, and deterministic event order. No
-routine test reads host counters or requires network access.
+interfaces, carrier and speed transitions, and deterministic event order.
+Monitor-cycle tests cover the 900-interface bound, worst-case per-interface
+event counts, and refusal of oversized inventories before events or probes are
+produced. No routine test reads host counters or requires network access.
 
 Kernel journal parsing uses synthetic JSON entries and an injected reader.
 Tests cover allowlisted normalized categories, ignored messages, invalid

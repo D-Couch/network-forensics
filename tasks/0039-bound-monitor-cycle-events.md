@@ -1,6 +1,6 @@
 # Task 0039 — Bound per-cycle monitor events
 
-**Status:** Proposed (not assigned)
+**Status:** Complete
 **Milestone:** Future reliability
 **Roadmap item:** Bound collection memory before storage batch validation.
 

@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const MAX_ENTRIES: usize = 100;
+pub(crate) const MAX_ENTRIES: usize = 100;
 const MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 

@@ -68,7 +68,7 @@ This section is the project’s single inventory of unimplemented product capabi
 
 - **Task 0031 — Reliability review:** completed; existing storage-limit, privilege, and report-privacy controls were retained. The concrete collection-memory and observation-gap issues are tracked separately as [Task 0039](../tasks/0039-bound-monitor-cycle-events.md) and [Task 0038](../tasks/0038-monitoring-gap-events.md).
 - Record detected monitoring gaps without attributing their cause. ([Task 0038](../tasks/0038-monitoring-gap-events.md))
-- Bound per-cycle interface observation memory before storage validation. ([Task 0039](../tasks/0039-bound-monitor-cycle-events.md))
+- [x] **Task 0039 — Bound per-cycle monitor events:** reject more than 900 interfaces before producing events, keeping complete cycle batches below the storage cap.
 - Add further interface evidence rules and richer route-change diagnostics. ([Task 0032](../tasks/0032-interface-and-route-evidence.md))
 - Consider Wi-Fi and VPN-specific correlation and comparative multi-interface incidents. ([Task 0033](../tasks/0033-wifi-vpn-and-multi-interface-correlation.md))
 - Resolve remaining interface-selection edge cases when defining their implementation tasks. ([Task 0034](../tasks/0034-interface-selection-edge-cases.md))
