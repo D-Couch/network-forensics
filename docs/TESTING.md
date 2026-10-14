@@ -37,7 +37,10 @@ should be tested without invoking a real network connection.
 Interface collection tests build synthetic sysfs trees for available, missing,
 invalid, and zero-valued counters. Default-route tests require an active IPv4
 `0.0.0.0/0` route and reject zero-destination routes with nonzero masks, such as
-one half of a split-default route. Tracker tests cover baseline and per-field
+one half of a split-default route. IPv6 route tests cover default-prefix,
+source-prefix, up/reject flags, metrics and deterministic tie breaking, and
+IPv4-first preference with IPv6 fallback when the IPv4 route is rejected.
+Tracker tests cover baseline and per-field
 deltas, partial unknown values, counter decreases, disappearing/reappearing
 interfaces, carrier and speed transitions, and deterministic event order. No
 routine test reads host counters or requires network access.

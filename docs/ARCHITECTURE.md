@@ -64,13 +64,15 @@ command.
 ### Current interface discovery
 
 The Linux interface inventory reads operational state, carrier, reported link
-speed, and available RX/TX error/drop counters from `/sys/class/net`, and selects
-the active IPv4 `0.0.0.0/0` route with the lowest metric from `/proc/net/route`.
-Routes with a zero destination but a nonzero netmask are not treated as default
-routes. IPv6 default-route discovery is not implemented. It performs no active
-probes and requires no elevated privileges. Missing or unsupported sysfs values
-remain unknown; the CLI reports an unavailable default route when it cannot
-identify one.
+speed, and available RX/TX error/drop counters from `/sys/class/net`. It selects
+the active IPv4 `0.0.0.0/0` route with the lowest metric from
+`/proc/net/route`, falling back to an active IPv6 `::/0` route from
+`/proc/net/ipv6_route` when no usable IPv4 default exists. IPv6 routes must be
+unrestricted by source prefix; down and reject routes are ignored in both
+tables. When both families have usable defaults on different interfaces, IPv4
+is preferred. The discovery does no active probes and requires no elevated
+privileges. Missing or unsupported sysfs values remain unknown; the CLI reports
+an unavailable default route when it cannot identify one.
 
 Foreground monitoring compares each interface with its preceding in-memory
 sample. It emits carrier and speed transitions plus per-round counter deltas;

@@ -4,6 +4,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+const RTF_UP: u32 = 0x0001;
+const RTF_REJECT: u32 = 0x0200;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OperationalState {
     Up,
@@ -77,16 +80,29 @@ pub struct Discovery {
     pub default_route: Option<String>,
 }
 
-/// Discovers all interfaces visible under `/sys/class/net` and the active
-/// IPv4 default route listed in `/proc/net/route`.
+/// Discovers all interfaces visible under `/sys/class/net`, preferring an
+/// active IPv4 default route and falling back to IPv6 when needed.
 pub fn discover() -> io::Result<Discovery> {
-    discover_at(Path::new("/sys/class/net"), Path::new("/proc/net/route"))
+    discover_at(
+        Path::new("/sys/class/net"),
+        Path::new("/proc/net/route"),
+        Path::new("/proc/net/ipv6_route"),
+    )
 }
 
-fn discover_at(sys_class_net: &Path, route_file: &Path) -> io::Result<Discovery> {
-    let default_route = fs::read_to_string(route_file)
+fn discover_at(
+    sys_class_net: &Path,
+    route_file: &Path,
+    route6_file: &Path,
+) -> io::Result<Discovery> {
+    let ipv4_default = fs::read_to_string(route_file)
         .ok()
         .and_then(|contents| parse_default_route(&contents));
+    let default_route = ipv4_default.or_else(|| {
+        fs::read_to_string(route6_file)
+            .ok()
+            .and_then(|contents| parse_ipv6_default_route(&contents))
+    });
     let mut interfaces = Vec::new();
 
     for entry in fs::read_dir(sys_class_net)? {
@@ -153,7 +169,42 @@ fn parse_default_route(contents: &str) -> Option<String> {
             let metric = fields.next()?.parse::<u32>().ok()?;
             let mask = fields.next()?;
 
-            (destination == "00000000" && mask == "00000000" && flags & 1 != 0)
+            (destination == "00000000"
+                && mask == "00000000"
+                && flags & RTF_UP != 0
+                && flags & RTF_REJECT == 0)
+                .then_some((metric, interface))
+        })
+        .min_by(|(left_metric, left_iface), (right_metric, right_iface)| {
+            left_metric
+                .cmp(right_metric)
+                .then_with(|| left_iface.cmp(right_iface))
+        })
+        .map(|(_, interface)| interface.to_owned())
+}
+
+fn parse_ipv6_default_route(contents: &str) -> Option<String> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let destination = fields.next()?;
+            let destination_prefix = fields.next()?;
+            let source = fields.next()?;
+            let source_prefix = fields.next()?;
+            let _next_hop = fields.next()?;
+            let metric = u32::from_str_radix(fields.next()?, 16).ok()?;
+            let _ref_count = fields.next()?;
+            let _use_count = fields.next()?;
+            let flags = u32::from_str_radix(fields.next()?, 16).ok()?;
+            let interface = fields.next()?;
+
+            (destination == "00000000000000000000000000000000"
+                && destination_prefix == "00"
+                && source == "00000000000000000000000000000000"
+                && source_prefix == "00"
+                && flags & RTF_UP != 0
+                && flags & RTF_REJECT == 0)
                 .then_some((metric, interface))
         })
         .min_by(|(left_metric, left_iface), (right_metric, right_iface)| {
@@ -196,6 +247,42 @@ mod tests {
             eth1 00000000 0100000A 0001 0 0 10 00000000 0 0 0\n\
             inactive 00000000 0100000A 0000 0 0 1 00000000 0 0 0\n";
         assert_eq!(parse_default_route(routes).as_deref(), Some("eth0"));
+    }
+
+    #[test]
+    fn ignores_reject_default_routes() {
+        let routes = [
+            "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT",
+            "reject 00000000 00000000 0201 0 0 1 00000000 0 0 0",
+        ]
+        .join("\n");
+        assert_eq!(parse_default_route(&routes), None);
+    }
+
+    #[test]
+    fn selects_lowest_metric_active_ipv6_default_deterministically() {
+        let routes = [
+            "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000014 00000001 00000000 00000001 eth1",
+            "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000005 00000001 00000000 00000001 eth0",
+            "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000001 00000001 00000000 00000001 eth0",
+        ]
+        .join("\n");
+        assert_eq!(parse_ipv6_default_route(&routes).as_deref(), Some("eth0"));
+    }
+
+    #[test]
+    fn ignores_nondefault_source_specific_down_and_reject_ipv6_routes() {
+        let zero = "00000000000000000000000000000000";
+        let routes = [
+            format!("{zero} 01 {zero} 00 {zero} 00000001 00000001 00000000 00000001 more-specific"),
+            format!(
+                "{zero} 00 {zero} 40 {zero} 00000001 00000001 00000000 00000001 source-specific"
+            ),
+            format!("{zero} 00 {zero} 00 {zero} 00000001 00000001 00000000 00000000 down"),
+            format!("{zero} 00 {zero} 00 {zero} 00000001 00000001 00000000 00000201 reject"),
+        ]
+        .join("\n");
+        assert_eq!(parse_ipv6_default_route(&routes), None);
     }
 
     #[test]
@@ -254,7 +341,8 @@ mod tests {
         )
         .unwrap();
 
-        let discovery = discover_at(&net, &route).unwrap();
+        let route6 = root.join("route6");
+        let discovery = discover_at(&net, &route, &route6).unwrap();
         let states = discovery.interfaces;
         assert_eq!(discovery.default_route.as_deref(), Some("zeta"));
         assert_eq!(states[0].name, "alpha");
@@ -268,6 +356,32 @@ mod tests {
         assert_eq!(states[1].counters.tx_errors, None);
         assert_eq!(states[1].counters.tx_dropped, None);
         assert!(states[1].is_default_route);
+
+        fs::write(
+            &route6,
+            "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000001 00000001 00000000 00000001 alpha\n",
+        )
+        .unwrap();
+        let discovery = discover_at(&net, &route, &route6).unwrap();
+        assert_eq!(discovery.default_route.as_deref(), Some("zeta"));
+
+        fs::write(
+            &route,
+            [
+                "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT",
+                "reject 00000000 00000000 0201 0 0 1 00000000 0 0 0",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            &route6,
+            "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000005 00000001 00000000 00000001 zeta\n",
+        )
+        .unwrap();
+        let discovery = discover_at(&net, &route, &route6).unwrap();
+        assert_eq!(discovery.default_route.as_deref(), Some("zeta"));
+        assert!(discovery.interfaces[1].is_default_route);
 
         fs::remove_dir_all(root).unwrap();
     }
