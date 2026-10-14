@@ -4,6 +4,8 @@
 **Milestone:** M4
 **Scope:** Add copyable examples for the existing setup/replay/report workflows and sanitized text/JSON report snapshots. Defer binary installation until release preparation is complete.
 
+**Current release direction:** A later project decision established manual, source-only GitHub Releases. Prebuilt binaries and packages are out of scope.
+
 ## Context
 
 The roadmap asks for prebuilt installation as well as examples. The repository has no license, and release preparation says to establish a license and release policy before distribution. This task resolves the conflict conservatively: document the dependency and complete the independent practical-examples portion without publishing binaries or calling a source build a no-build install path.

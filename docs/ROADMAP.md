@@ -56,7 +56,7 @@ This section is the project’s single inventory of unimplemented product capabi
 ### Usability
 
 - Extend `status` with active-process and complete monitor-configuration awareness only if a later task explicitly adds safe lifecycle/configuration persistence.
-- Provide a prebuilt Linux installation path after licensing and release policy are established; the repository currently has no license and does not publish binaries.
+- Prebuilt binaries and package repositories are out of scope; users build from source using the README instructions.
 
 ### Core capability and reliability
 
@@ -69,8 +69,7 @@ This section is the project’s single inventory of unimplemented product capabi
 ### Release preparation
 
 - Add contributor documentation.
-- Select and add an open-source license before inviting external reuse or contributions; establish contribution and release policies before release.
-- Consider additional distribution packages.
+- Add contributor documentation.
 
 ### Separate proposals
 
@@ -80,3 +79,5 @@ This section is the project’s single inventory of unimplemented product capabi
 ## Release discipline
 
 At each task completion: explain modifications, test results and test gaps, behavior demonstrations, risks, and the next specific task. No implementation beyond the current assignment without approval.
+
+Project release policy: publish manually as versioned GitHub Releases with brief notes and source only. Do not publish prebuilt binaries or package repositories.
