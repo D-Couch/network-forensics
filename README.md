@@ -1,6 +1,6 @@
 # Network Forensics
 
-**Status:** Repository foundation, passive interface inventory, explicit TCP and opt-in DNS probes, foreground monitoring, bounded local event persistence, deterministic incident lifecycle and analysis APIs, read-only incident history, and offline fixture replay are implemented.
+**Status:** Repository foundation, passive interface inventory, explicit TCP and opt-in DNS probes, foreground monitoring, bounded local event persistence, deterministic incident lifecycle and analysis APIs, guided target setup, filtered read-only incident history, and offline fixture replay are implemented.
 
 Network Forensics is a Linux-first, privacy-conscious network diagnostic tool in early development. The current CLI inventories local interfaces, performs explicitly configured TCP connection probes, emits foreground observations, and displays incident history derived from stored probe events. Diagnostic findings and reports are available through read-only commands.
 
@@ -92,7 +92,8 @@ Read-only monitoring by default; no packet payload collection, network configura
 
 ## Getting started
 
-Build the application with a current Rust toolchain and Cargo:
+There is not yet a prebuilt Linux package or downloadable binary. For now,
+build from a checkout with a current Rust toolchain and Cargo:
 
 ```sh
 cargo build
@@ -139,6 +140,17 @@ cargo run -- incidents
 cargo run -- analyze --latest
 cargo run -- report --latest
 ```
+
+To try the analysis without a database or network access, replay a checked-in
+scenario:
+
+```sh
+cargo run -- replay tests/fixtures/endpoint-specific/events.json
+```
+
+Sanitized report snapshots are available in [text](examples/sanitized-report.txt)
+and [JSON](examples/sanitized-report.json). They use synthetic event IDs and
+times, and role-scoped target labels instead of configured addresses.
 
 History, analysis, and reports do not make network requests. Reports redact
 target addresses by default. To develop or verify changes, run:

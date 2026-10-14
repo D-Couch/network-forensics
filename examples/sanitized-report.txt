@@ -1,0 +1,14 @@
+Target identifiers are redacted; use --include-identifiers to show configured addresses.
+sample-incident-1 [OPEN]
+  Target: external external-target-1
+  Started: 2026-10-13 00:00:00 UTC (sequence 1)
+  Last failure: 2026-10-13 00:00:20 UTC (sequence 3)
+  Failure evidence: sample-probe-failure-1, sample-probe-failure-2
+  Finding: endpoint_specific_evidence
+  A different configured external target succeeded while this target had qualifying failures. The evidence is target-specific and does not establish why this endpoint failed.
+  Corroborating evidence: sample-probe-failure-1, sample-probe-failure-2, sample-other-target-success
+  Limitation: TCP probe outcomes describe only the configured IP:port endpoints.
+  Limitation: Gateway and external roles are labels supplied by the caller.
+  Limitation: No route-to-interface mapping is available to verify that a carrier or kernel journal observation affected this probe path.
+  Limitation: DNS-specific causes remain undetermined without a correlated DNS-query failure and independent TCP success; DNS observations describe only the explicitly configured query name.
+  Follow-up: Verify that the intended service should accept TCP at this IP:port, then compare a fresh probe to it with another configured external target. This narrows the evidence to the endpoint but does not explain the failure.

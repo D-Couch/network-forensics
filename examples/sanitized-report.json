@@ -1,0 +1,44 @@
+{
+  "report_schema_version": 1,
+  "identifiers_included": false,
+  "incidents": [
+    {
+      "id": "sample-incident-1",
+      "status": "open",
+      "target_role": "external",
+      "target": "external-target-1",
+      "started_sequence": 1,
+      "last_failure_sequence": 3,
+      "recovered_sequence": null,
+      "started_at_utc": "2026-10-13T00:00:00Z",
+      "last_failure_at_utc": "2026-10-13T00:00:20Z",
+      "recovered_at_utc": null,
+      "failure_event_ids": [
+        "sample-probe-failure-1",
+        "sample-probe-failure-2"
+      ],
+      "recovery_event_ids": [],
+      "contains_observation_gap": false,
+      "contains_clock_adjustment": false
+    }
+  ],
+  "findings": [
+    {
+      "incident_id": "sample-incident-1",
+      "classification": "endpoint_specific_evidence",
+      "explanation": "A different configured external target succeeded while this target had qualifying failures. The evidence is target-specific and does not establish why this endpoint failed.",
+      "evidence_event_ids": [
+        "sample-probe-failure-1",
+        "sample-probe-failure-2",
+        "sample-other-target-success"
+      ],
+      "limitations": [
+        "TCP probe outcomes describe only the configured IP:port endpoints.",
+        "Gateway and external roles are labels supplied by the caller.",
+        "No route-to-interface mapping is available to verify that a carrier or kernel journal observation affected this probe path.",
+        "DNS-specific causes remain undetermined without a correlated DNS-query failure and independent TCP success; DNS observations describe only the explicitly configured query name."
+      ],
+      "suggested_follow_up": "Verify that the intended service should accept TCP at this IP:port, then compare a fresh probe to it with another configured external target. This narrows the evidence to the endpoint but does not explain the failure."
+    }
+  ]
+}
