@@ -78,29 +78,63 @@ Read-only monitoring by default; no packet payload collection, network configura
 - [`AGENTS.md`](AGENTS.md): persistent instructions for Codex.
 - [`tasks/0001-repository-foundation.md`](tasks/0001-repository-foundation.md): first narrowly scoped implementation task.
 
-## Getting started with Codex
+## Getting started
 
-1. Open this repository directory as a project in Codex.
-2. Ask Codex to read `AGENTS.md`, the next assigned task, and its referenced documentation.
-3. Review changes and test results at each milestone. Task 0001 is complete; the current implementation and remaining work are summarized in this README and `docs/ROADMAP.md`.
-
-The Cargo package includes `--help`, `--version`, passive interface inventory,
-explicit TCP probes, foreground monitoring with local persistence, incident
-history, analysis and reports. With Rust and Cargo installed, build and verify it with:
+Build the application with a current Rust toolchain and Cargo:
 
 ```sh
 cargo build
+```
+
+Start with commands that only inspect local state:
+
+```sh
 cargo run -- --help
-cargo run -- --version
 cargo run -- interfaces
-cargo run -- probe --help
 cargo run -- monitor --help
+```
+
+`interfaces` reads local Linux interface and route information; it does not
+probe the network. Before monitoring, choose two distinct numeric IP:port
+targets for external TCP services that you are allowed to contact and expect
+to accept connections. A gateway target is optional and is only a label for
+the endpoint you supply; the program does not verify that it is your gateway.
+There are no built-in probe destinations or automatic target discovery.
+
+The following is a command template, not a ready-to-run command. Replace both
+`<IP:PORT>` placeholders with your chosen targets before running it:
+
+```sh
+cargo run -- monitor --external <IP:PORT> --external <IP:PORT>
+```
+
+Monitoring makes repeated TCP connection attempts only to the configured
+targets. It does not query DNS unless you add `--dns-name <FQDN>`, and it does
+not read kernel journal entries unless you add `--kernel-journal`. Review the
+data-retention defaults and privacy notes above before starting. Stop with
+Ctrl+C; an in-progress probe may finish within its configured timeout. The
+monitor stores observations in the local database described above.
+
+After collecting events, inspect them locally with:
+
+```sh
+cargo run -- incidents
 cargo run -- analyze --latest
-cargo run -- report --latest --format json
+cargo run -- report --latest
+```
+
+History, analysis, and reports do not make network requests. Reports redact
+target addresses by default. To develop or verify changes, run:
+
+```sh
 cargo test
 cargo fmt --check
 cargo clippy -- -D warnings
+cargo build
 ```
+
+For Codex work, open this repository as a project, read `AGENTS.md` and the
+currently assigned task, and review its changes and test results when complete.
 
 The event JSON representation is versioned. New events use schema version 4; events from schema versions 1 through 3 remain readable:
 

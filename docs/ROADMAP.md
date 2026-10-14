@@ -41,6 +41,7 @@ events, without persisting derived incident records.
 - Add CLI/TUI overview only if required to make incident review materially easier.
 - Harden bounded queues, limits, retention, privilege checks, suspend/resume, and privacy-safe exports.
 - [x] **Task 0015 — Linux CI:** run formatting, tests, Clippy, and build on pushes and pull requests.
+- [x] **Task 0016 — First-run CLI guide:** explain a safe local-first path through the existing commands and the effects of monitoring.
 - Installation/distribution instructions, example sanitized reports, contributor documentation, selected open-source license.
 
 **M4 exit:** An unrelated Linux user can install, monitor, investigate a problem, and share a sanitized report with documented limitations.
