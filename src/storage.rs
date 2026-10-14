@@ -227,6 +227,9 @@ impl EventStore {
         )?;
 
         for event in events {
+            if event.recorded_at_utc.timestamp_millis() < cutoff {
+                continue;
+            }
             let event_json = serde_json::to_string(event)?;
             transaction.execute(
                 "INSERT INTO events (event_id, schema_version, recorded_at_utc, recorded_at_unix_ms, source, event_kind, event_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -656,6 +659,25 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["two", "three"]
         );
+    }
+
+    #[test]
+    fn age_retention_discards_stale_incoming_events_and_keeps_cutoff() {
+        let policy = RetentionPolicy::new(1, 10).unwrap();
+        let mut store = EventStore::open_in_memory(policy).unwrap();
+        let now = "2026-10-13T00:00:00Z".parse().unwrap();
+
+        store
+            .store_events_at(&[event("stale", "2026-10-11T23:59:59Z")], now)
+            .unwrap();
+        assert_eq!(store.event_count().unwrap(), 0);
+
+        store
+            .store_events_at(&[event("at-cutoff", "2026-10-12T00:00:00Z")], now)
+            .unwrap();
+        let rows = store.read_events_after(0, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].event.id, "at-cutoff");
     }
 
     #[test]

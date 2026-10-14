@@ -67,9 +67,9 @@ not inspect running processes, open the default database, or access the network.
 
 The event store tests use in-memory SQLite or temporary files. They cover
 schema migration and rejection, durable reopen and sequence paging, atomic
-rollback, age/count retention, path validation, Unix permissions, and symlink
-refusal. Tests must not open the default user database or rely on environment
-paths.
+rollback, age/count retention including the incoming-event cutoff boundary,
+path validation, Unix permissions, and symlink refusal. Tests must not open the
+default user database or rely on environment paths.
 
 Incident lifecycle tests use synthetic stored events and the pure analysis API.
 They cover per-target separation, qualifying and inconclusive outcomes,

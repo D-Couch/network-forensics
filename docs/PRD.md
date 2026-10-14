@@ -58,7 +58,7 @@ Tasks 0008, 0010, and 0014 provide a pure deterministic analysis API over stored
 
 ### FR-07 Persistence and export
 
-Persist records locally in SQLite, with schema migration strategy, retention options, and explicit handling of write failures. The current implementation persists versioned observation events with indexed metadata and bounded retention; `incidents`, `analyze --latest`, and `report --latest` read the database without modifying it and recompute derived results. Text and versioned JSON reports redact target addresses by default; raw target addresses appear only when explicitly requested and warned. DNS query names and raw event payloads are excluded from reports. The roadmap is the single inventory of unimplemented persistence and export capabilities.
+Persist records locally in SQLite, with schema migration strategy, retention options, and explicit handling of write failures. The current implementation persists versioned observation events with indexed metadata and bounded retention; incoming events older than the configured age cutoff are discarded in the same transaction. `incidents`, `analyze --latest`, and `report --latest` read the database without modifying it and recompute derived results. Text and versioned JSON reports redact target addresses by default; raw target addresses appear only when explicitly requested and warned. DNS query names and raw event payloads are excluded from reports. The roadmap is the single inventory of unimplemented persistence and export capabilities.
 
 ### FR-08 Replay
 

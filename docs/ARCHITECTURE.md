@@ -215,6 +215,8 @@ indexes support later filtering; sequence is the stable pagination order.
 
 Each monitor cycle is committed in one immediate transaction. Age and count
 retention run in the same transaction. Defaults are 30 days and 100000 events;
+new events older than the age cutoff are discarded in the same write, while an
+event exactly at the cutoff remains eligible for storage.
 the database limit is 256 MiB. Configuration ranges and limits are described
 in the README and enforced by the CLI/storage API. Reads are paged by sequence,
 up to 1000 events per request. Write batches are capped at 4096 events. Storage

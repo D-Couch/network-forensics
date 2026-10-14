@@ -49,6 +49,7 @@ events, without persisting derived incident records.
 - [x] **Task 0024 — Probe target and cadence guidance:** explain target permission, one-attempt sequential rounds, and interval behavior.
 - [x] **Task 0025 — Validate IPv4 default-route netmask:** ignore zero-destination routes whose netmask is not zero.
 - [x] **Task 0026 — IPv6 default-route fallback:** discover an active IPv6 default when no usable IPv4 default exists.
+- [x] **Task 0027 — Apply age retention to new events:** discard incoming events older than the configured cutoff.
 
 **M4 exit:** An unrelated Linux user can install, monitor, investigate a problem, and share a sanitized report with documented limitations.
 
