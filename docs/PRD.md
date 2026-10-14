@@ -34,7 +34,7 @@ Record relevant, timestamped observations; assemble them into coherent incidents
 
 ### FR-01 CLI and configuration
 
-The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, and `report --latest`. The current implementation provides help/version, `interfaces`, one-shot `probe`, foreground `monitor`, read-only `incidents`, `analyze --latest`, and text/JSON `report --latest`. The current status of unimplemented capabilities is tracked only in the [roadmap](ROADMAP.md). Reports redact configured target addresses by default and require explicit `--include-identifiers` to include them. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
+The target interface is `netforensics --help`, `--version`, `status`, `monitor`, `incidents`, `analyze --latest`, and `report --latest`. The current implementation provides help/version, read-only `status`, `interfaces`, one-shot `probe`, foreground `monitor`, read-only `incidents`, `analyze --latest`, and text/JSON `report --latest`. `status` summarizes retained observations but cannot detect an active foreground monitor or reconstruct the complete monitor configuration. The current status of other unimplemented capabilities is tracked only in the [roadmap](ROADMAP.md). Reports redact configured target addresses by default and require explicit `--include-identifiers` to include them. Task 0001 historically required only help/version. Configuration must have explicit documented defaults, validation, and safe behavior on invalid inputs.
 
 ### FR-02 Probe observation
 

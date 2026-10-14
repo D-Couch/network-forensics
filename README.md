@@ -13,6 +13,13 @@ Linux desktop users, developers, homelab operators, and support engineers invest
 ## Currently implemented
 
 - `netforensics --help` and `netforensics --version`.
+- `netforensics status` summarizes the latest retained observations, including
+  explicitly unknown interface values and the latest probe, DNS, and
+  normalized kernel-link observations. It reads the database without changing
+  it. Because monitoring runs in the foreground and its complete options are
+  not stored, status cannot say whether a monitor is currently running or
+  reconstruct every configured target. Missing DNS or kernel events do not
+  distinguish disabled collection from unavailable/no matching observations.
 - `netforensics interfaces` lists Linux interfaces, operational state, carrier,
   reported speed, and the interface on the lowest-metric active default route
   when available. Missing sysfs/procfs values appear as unavailable. The
@@ -119,6 +126,7 @@ monitor stores observations in the local database described above.
 After collecting events, inspect them locally with:
 
 ```sh
+cargo run -- status
 cargo run -- incidents
 cargo run -- analyze --latest
 cargo run -- report --latest

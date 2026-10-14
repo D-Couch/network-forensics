@@ -11,7 +11,8 @@ pub mod report;
 pub mod storage;
 
 use crate::event::{
-    Event, EventKind, ProbeFailureCategory, ProbeLimitationCategory, ProbeOutcome, ProbeRole,
+    DnsOutcome, Event, EventKind, KernelLinkSignalCategory, ProbeFailureCategory,
+    ProbeLimitationCategory, ProbeOutcome, ProbeRole,
 };
 use crate::incidents::{analyze_events, Incident, IncidentError, IncidentStatus};
 use crate::monitor::{MonitorConfig, DEFAULT_INTERVAL_MILLIS};
@@ -24,7 +25,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n\nCommands:\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -33,6 +34,15 @@ fn main() {
         [arg] if arg == "--help" || arg == "-h" => print!("{HELP}"),
         [arg] if arg == "--version" || arg == "-V" => {
             println!("netforensics {}", env!("CARGO_PKG_VERSION"))
+        }
+        [command] if command == "status" => {
+            if let Err(error) = run_status() {
+                eprintln!("Could not read local status: {error}");
+                std::process::exit(1);
+            }
+        }
+        [command, flag] if command == "status" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
         }
         [command] if command == "incidents" => {
             if let Err(error) = run_incidents() {
@@ -122,6 +132,249 @@ fn run_incidents() -> Result<(), Box<dyn std::error::Error>> {
     let incidents = load_incidents(&store)?;
     print_incidents(&incidents);
     Ok(())
+}
+
+#[derive(Default)]
+struct StatusSummary {
+    event_count: usize,
+    latest_event: Option<(i64, chrono::DateTime<chrono::Utc>)>,
+    latest_probe: Option<storage::StoredEvent>,
+    latest_interface: Option<storage::StoredEvent>,
+    latest_counters: Option<storage::StoredEvent>,
+    latest_dns: Option<storage::StoredEvent>,
+    latest_kernel_signal: Option<storage::StoredEvent>,
+}
+
+fn run_status() -> Result<(), Box<dyn std::error::Error>> {
+    let store = match EventStore::open_default_read_only() {
+        Ok(store) => store,
+        Err(StorageError::DatabaseNotFound) => {
+            println!("{}", render_status(&StatusSummary::default()));
+            return Ok(());
+        }
+        Err(error) => return Err(Box::new(error)),
+    };
+    println!("{}", render_status(&load_status(&store)?));
+    Ok(())
+}
+
+fn load_status(store: &EventStore) -> Result<StatusSummary, StorageError> {
+    let mut summary = StatusSummary::default();
+    let mut cursor = 0;
+    loop {
+        let page = store.read_events_after(cursor, 1_000)?;
+        let Some(last) = page.last() else {
+            break;
+        };
+        cursor = last.sequence;
+        for stored in page {
+            summary.event_count += 1;
+            summary.latest_event = Some((stored.sequence, stored.event.recorded_at_utc));
+            match &stored.event.kind {
+                EventKind::ProbeResult { .. } => summary.latest_probe = Some(stored),
+                EventKind::InterfaceSnapshot { .. } => summary.latest_interface = Some(stored),
+                EventKind::InterfaceCounterDelta { .. } => summary.latest_counters = Some(stored),
+                EventKind::DnsResult { .. } => summary.latest_dns = Some(stored),
+                EventKind::KernelLinkSignal { .. } => summary.latest_kernel_signal = Some(stored),
+                EventKind::LinkStateChanged { .. } | EventKind::LinkSpeedChanged { .. } => {}
+            }
+        }
+    }
+    Ok(summary)
+}
+
+fn render_status(summary: &StatusSummary) -> String {
+    use std::fmt::Write as _;
+    let mut output = String::from("Local status (retained observation history)\n");
+    if summary.event_count == 0 {
+        output.push_str(
+            "No observations are stored yet. Start `netforensics monitor` to collect them.\n",
+        );
+    } else {
+        writeln!(output, "Retained observations: {}", summary.event_count).unwrap();
+        if let Some((sequence, recorded_at)) = &summary.latest_event {
+            writeln!(
+                output,
+                "Latest observation: {} (sequence {})",
+                recorded_at, sequence
+            )
+            .unwrap();
+        }
+    }
+
+    output.push_str("Monitor process: unknown (monitoring runs in the foreground; status does not inspect processes).\n");
+    output.push_str("Complete current monitor configuration: not stored in event history.\n");
+
+    if let Some(probe) = &summary.latest_probe {
+        if let EventKind::ProbeResult {
+            role,
+            target,
+            outcome,
+            ..
+        } = &probe.event.kind
+        {
+            writeln!(
+                output,
+                "Latest probe: {role:?} {target} — {} at {}",
+                describe_probe_outcome(outcome),
+                probe.event.recorded_at_utc
+            )
+            .unwrap();
+            output.push_str(
+                "This is the last recorded probe, not a complete list of configured targets.\n",
+            );
+        }
+    } else {
+        output.push_str("Probe observations: none retained.\n");
+    }
+
+    render_latest_interface(&mut output, &summary.latest_interface);
+    render_latest_counters(&mut output, &summary.latest_counters);
+
+    match &summary.latest_dns {
+        Some(stored) => {
+            if let EventKind::DnsResult { outcome, .. } = &stored.event.kind {
+                writeln!(
+                    output,
+                    "Latest DNS observation: {} at {} (query name omitted)",
+                    describe_dns_outcome(outcome),
+                    stored.event.recorded_at_utc
+                )
+                .unwrap();
+            }
+        }
+        None => output
+            .push_str("DNS: no query event retained (sampling may not have been configured).\n"),
+    }
+
+    match &summary.latest_kernel_signal {
+        Some(stored) => {
+            if let EventKind::KernelLinkSignal {
+                category,
+                interface,
+            } = &stored.event.kind
+            {
+                let category = match category {
+                    KernelLinkSignalCategory::LinkUp => "link_up",
+                    KernelLinkSignalCategory::LinkDown => "link_down",
+                    KernelLinkSignalCategory::NetdevWatchdog => "netdev_watchdog",
+                };
+                let interface = interface
+                    .as_deref()
+                    .map(|name| name.escape_debug().to_string())
+                    .unwrap_or_else(|| "unknown".to_owned());
+                writeln!(
+                    output,
+                    "Latest kernel link signal: {category} on {interface} at {}",
+                    stored.event.recorded_at_utc
+                )
+                .unwrap();
+            }
+        }
+        None => output.push_str("Kernel journal: no normalized link signal retained (collection may be disabled, unavailable, or have no matching messages).\n"),
+    }
+
+    output
+}
+
+fn render_latest_interface(output: &mut String, latest: &Option<storage::StoredEvent>) {
+    use std::fmt::Write as _;
+    let Some(stored) = latest else {
+        output.push_str("Interface snapshots: none retained.\n");
+        return;
+    };
+    if let EventKind::InterfaceSnapshot {
+        interface,
+        operational_state,
+        carrier,
+        speed_mbps,
+        is_default_route,
+    } = &stored.event.kind
+    {
+        writeln!(
+            output,
+            "Latest interface snapshot: {} state={}, carrier={}, speed={}, default_route={} at {}",
+            interface.escape_debug(),
+            operational_state.escape_debug(),
+            optional_bool(*carrier),
+            optional_value(*speed_mbps, " Mbps"),
+            optional_bool(*is_default_route),
+            stored.event.recorded_at_utc
+        )
+        .unwrap();
+    }
+}
+
+fn render_latest_counters(output: &mut String, latest: &Option<storage::StoredEvent>) {
+    use std::fmt::Write as _;
+    let Some(stored) = latest else {
+        output.push_str("Counter samples: none retained.\n");
+        return;
+    };
+    if let EventKind::InterfaceCounterDelta {
+        interface,
+        sample_available,
+        counter_reset_detected,
+        rx_errors_delta,
+        tx_errors_delta,
+        rx_dropped_delta,
+        tx_dropped_delta,
+        ..
+    } = &stored.event.kind
+    {
+        let availability = if *sample_available {
+            "available"
+        } else {
+            "unavailable"
+        };
+        writeln!(
+            output,
+            "Latest counter sample: {} sample={}, reset_detected={}, rx_errors={}, tx_errors={}, rx_dropped={}, tx_dropped={} at {}",
+            interface.escape_debug(),
+            availability,
+            counter_reset_detected,
+            optional_value(*rx_errors_delta, ""),
+            optional_value(*tx_errors_delta, ""),
+            optional_value(*rx_dropped_delta, ""),
+            optional_value(*tx_dropped_delta, ""),
+            stored.event.recorded_at_utc
+        )
+        .unwrap();
+    }
+}
+
+fn optional_bool(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "unknown",
+    }
+}
+
+fn optional_value<T: std::fmt::Display>(value: Option<T>, suffix: &str) -> String {
+    value
+        .map(|value| format!("{value}{suffix}"))
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn describe_probe_outcome(outcome: &ProbeOutcome) -> String {
+    match outcome {
+        ProbeOutcome::Success => "success".to_owned(),
+        ProbeOutcome::Timeout => "timeout".to_owned(),
+        ProbeOutcome::Failure(category) => format!("failure ({})", failure_name(*category)),
+        ProbeOutcome::UnsupportedOrBlocked(category) => {
+            format!("unsupported or blocked ({})", limitation_name(*category))
+        }
+    }
+}
+
+fn describe_dns_outcome(outcome: &DnsOutcome) -> String {
+    match outcome {
+        DnsOutcome::Success { answer_count } => format!("success ({answer_count} answers)"),
+        DnsOutcome::Timeout => "timeout".to_owned(),
+        DnsOutcome::Failure(category) => format!("failure ({category:?})"),
+        DnsOutcome::UnsupportedOrBlocked(category) => format!("unavailable ({category:?})"),
+    }
 }
 
 fn load_incidents(store: &EventStore) -> Result<Vec<Incident>, HistoryError> {
@@ -716,6 +969,92 @@ mod tests {
                 outcome,
             },
         }
+    }
+
+    fn status_event(id: &str, kind: EventKind) -> Event {
+        Event {
+            schema_version: SCHEMA_VERSION,
+            id: id.to_owned(),
+            recorded_at_utc: "2026-10-13T00:00:00Z".parse().unwrap(),
+            source: "test".to_owned(),
+            kind,
+        }
+    }
+
+    #[test]
+    fn status_reports_empty_history_without_claiming_monitor_state() {
+        let output = render_status(&StatusSummary::default());
+        assert!(output.contains("No observations are stored yet"));
+        assert!(output.contains("Monitor process: unknown"));
+        assert!(output.contains("Complete current monitor configuration: not stored"));
+        assert!(output.contains("DNS: no query event retained"));
+        assert!(output.contains("Kernel journal: no normalized link signal retained"));
+    }
+
+    #[test]
+    fn status_summarizes_stored_events_read_only_and_omits_dns_query_names() {
+        let mut store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
+        store
+            .store_events_at(
+                &[
+                    status_event(
+                        "interface",
+                        EventKind::InterfaceSnapshot {
+                            interface: "eth-test".to_owned(),
+                            operational_state: "unknown".to_owned(),
+                            carrier: None,
+                            speed_mbps: None,
+                            is_default_route: None,
+                        },
+                    ),
+                    status_event(
+                        "counters",
+                        EventKind::InterfaceCounterDelta {
+                            interface: "eth-test".to_owned(),
+                            baseline_available: false,
+                            sample_available: false,
+                            counter_reset_detected: false,
+                            rx_errors_delta: None,
+                            tx_errors_delta: None,
+                            rx_dropped_delta: None,
+                            tx_dropped_delta: None,
+                        },
+                    ),
+                    history_event("probe".to_owned(), ProbeOutcome::Timeout),
+                    status_event(
+                        "dns",
+                        EventKind::DnsResult {
+                            query_name: "private.example.".to_owned(),
+                            started_at_utc: "2026-10-13T00:00:00Z".parse().unwrap(),
+                            elapsed_ms: 12,
+                            outcome: DnsOutcome::Success { answer_count: 1 },
+                        },
+                    ),
+                    status_event(
+                        "kernel",
+                        EventKind::KernelLinkSignal {
+                            category: KernelLinkSignalCategory::LinkDown,
+                            interface: Some("eth-test".to_owned()),
+                        },
+                    ),
+                ],
+                "2026-10-13T00:00:00Z".parse().unwrap(),
+            )
+            .unwrap();
+
+        let count_before = store.event_count().unwrap();
+        let status = load_status(&store).unwrap();
+        let output = render_status(&status);
+        assert_eq!(status.latest_event.as_ref().unwrap().0, 5);
+        assert_eq!(store.event_count().unwrap(), count_before);
+        assert!(output.contains("Retained observations: 5"));
+        assert!(output.contains("carrier=unknown, speed=unknown, default_route=unknown"));
+        assert!(output.contains("sample=unavailable"));
+        assert!(output.contains("Latest probe: External 192.0.2.8:443 — timeout"));
+        assert!(output.contains("Latest DNS observation: success (1 answers)"));
+        assert!(!output.contains("private.example."));
+        assert!(output.contains("Latest kernel link signal: link_down"));
+        assert!(output.contains("Complete current monitor configuration: not stored"));
     }
 
     #[test]

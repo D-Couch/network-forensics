@@ -51,6 +51,11 @@ evidence citations, stable target redaction, explicit raw-identifier opt-in,
 CLI option validation, and analysis over read-only paged stored events. They
 must not open the default database or make network requests.
 
+Status tests use in-memory history to check empty and populated summaries,
+explicit unknown interface/counter values, optional-signal absence wording,
+insertion ordering, DNS query-name omission, and read-only behavior. They must
+not inspect running processes, open the default database, or access the network.
+
 The event store tests use in-memory SQLite or temporary files. They cover
 schema migration and rejection, durable reopen and sequence paging, atomic
 rollback, age/count retention, path validation, Unix permissions, and symlink

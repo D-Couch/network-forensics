@@ -40,6 +40,7 @@ events, without persisting derived incident records.
 - [x] **Task 0014 — Kernel link analysis:** allow correlated link-down/watchdog observations to support existing local-link evidence.
 - [x] **Task 0015 — Linux CI:** run formatting, tests, Clippy, and build on pushes and pull requests.
 - [x] **Task 0016 — First-run CLI guide:** explain a safe local-first path through the existing commands and the effects of monitoring.
+- [x] **Task 0017 — Read-only status:** summarize retained observations and explicit unknowns without claiming live monitor state or reconstructing unstored configuration.
 
 **M4 exit:** An unrelated Linux user can install, monitor, investigate a problem, and share a sanitized report with documented limitations.
 
@@ -49,7 +50,7 @@ This section is the project’s single inventory of unimplemented product capabi
 
 ### Usability
 
-- Add a concise `status` or overview command showing monitor configuration, the latest collection time, and unavailable signals.
+- Extend `status` with active-process and complete monitor-configuration awareness only if a later task explicitly adds safe lifecycle/configuration persistence.
 - Add guided setup for probe targets, including a clear explanation that the gateway role labels a user-supplied endpoint and does not verify actual gateway reachability.
 - Improve incident browsing with time and target filters, plus comparisons of observations before and after an outage.
 - Add finding-specific troubleshooting guidance that clearly separates observed evidence from possible explanations.

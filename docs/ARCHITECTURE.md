@@ -21,7 +21,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 
 ## 2. Modules (logical, not mandatory crates)
 
-- `main.rs`: current command parsing and user-facing output.
+- `main.rs`: current command parsing and user-facing output, including the read-only `status` summary; status cannot inspect foreground monitor state or recover unstored options.
 - `event`: typed, versioned observation events (implemented).
 - `interfaces`: Linux interface state and default-route discovery (implemented).
 - `probes` and `dns`: explicit TCP checks and opt-in system-configured DNS lookups (implemented).
@@ -32,7 +32,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 - `report`: pure versioned text/JSON reports, redacted by default (Task 0011); see the roadmap for unimplemented capability status.
 - `replay`: strict bounded JSON fixture replay through incident and analysis APIs (Task 0009); see the roadmap for unimplemented capability status.
 
-### Current analysis and report CLI
+### Current read-only history commands
 
 `analyze --latest` reads retained events by insertion sequence, derives incidents,
 and renders their findings. `report --latest` performs the same analysis and
@@ -42,6 +42,12 @@ perform no network activity. Reports map each distinct target consistently to
 a role-scoped label; `--include-identifiers` includes raw target addresses and
 prints a sharing warning to stderr. Report bodies contain event IDs and
 timestamps for evidence review but omit DNS query names and raw event payloads.
+
+`status` pages the existing database in insertion order and summarizes its
+latest event, probe, interface snapshot/counter sample, and optional DNS and
+normalized kernel-link events. Missing optional events are described as
+absent from retained history; the command does not infer whether collection was
+disabled or unavailable. It performs no network, process, or write operations.
 
 **Implementation rule:** Keep one Cargo package and Rust modules. Extract crates only if justified by dependency separation or actual reuse. Do not scaffold unused modules.
 
