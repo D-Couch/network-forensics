@@ -26,6 +26,10 @@ The current probe tests inject both transport outcomes and clock readings. They
 must remain network-independent; do not add live endpoint checks to the routine
 test suite.
 
+Guided setup tests use synthetic terminal input/output to cover invalid and
+duplicate external targets, optional gateway-role entry, EOF, and the generated
+command/disclaimer. They must not invoke probes, monitoring, or system discovery.
+
 The monitor's round tests use fake transport and clock implementations and
 validate the newline-delimited event output. Signal and CLI target validation
 should be tested without invoking a real network connection.

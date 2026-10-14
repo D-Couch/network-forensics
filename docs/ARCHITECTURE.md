@@ -21,7 +21,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 
 ## 2. Modules (logical, not mandatory crates)
 
-- `main.rs`: current command parsing and user-facing output, including the read-only `status` summary; status cannot inspect foreground monitor state or recover unstored options.
+- `main.rs`: current command parsing and user-facing output, including read-only `status` and interactive target `setup`; setup prints a command but does not start monitoring.
 - `event`: typed, versioned observation events (implemented).
 - `interfaces`: Linux interface state and default-route discovery (implemented).
 - `probes` and `dns`: explicit TCP checks and opt-in system-configured DNS lookups (implemented).
@@ -50,6 +50,16 @@ absent from retained history; the command does not infer whether collection was
 disabled or unavailable. It performs no network, process, or write operations.
 
 **Implementation rule:** Keep one Cargo package and Rust modules. Extract crates only if justified by dependency separation or actual reuse. Do not scaffold unused modules.
+
+### Guided target setup
+
+`setup` prompts for two external numeric IP:port endpoints on distinct IP
+addresses and an optional gateway-role endpoint. It validates the same target
+syntax used by monitoring, explains that external endpoints should be expected to accept TCP,
+and states that the gateway role is only a caller-supplied label. It prints a
+shell-quoted monitor command for review but performs no probes, database access,
+or system/network discovery. Monitoring begins only when the user runs that
+command.
 
 ### Current interface discovery
 

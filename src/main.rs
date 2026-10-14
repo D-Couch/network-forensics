@@ -22,12 +22,12 @@ use crate::storage::{
 };
 use std::env;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, BufRead, Read, Write};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n  netforensics replay <FIXTURE.json>\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, replay, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n  netforensics replay <FIXTURE.json>\n  netforensics setup\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n  setup            Guide target selection and print a monitor command\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, replay, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -62,6 +62,15 @@ fn main() {
             print!("{HELP}");
         }
         [command, flag] if command == "replay" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
+        }
+        [command] if command == "setup" => {
+            if let Err(error) = run_setup(&mut io::stdin().lock(), &mut io::stdout().lock()) {
+                eprintln!("Setup stopped: {error}");
+                std::process::exit(1);
+            }
+        }
+        [command, flag] if command == "setup" && (flag == "--help" || flag == "-h") => {
             print!("{HELP}");
         }
         [command, path] if command == "replay" => {
@@ -438,6 +447,105 @@ fn run_replay(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let result = replay::replay_json(&input)?;
     println!("{}", render_replay(&result));
     Ok(())
+}
+
+fn run_setup<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> io::Result<()> {
+    writeln!(writer, "Guided monitoring setup")?;
+    writeln!(writer, "Choose two distinct external services you may contact and expect to accept TCP on the chosen ports. Enter numeric IP:PORT values; setup makes no network requests.")?;
+    writeln!(writer, "A gateway-role target is optional. It is only a label for the endpoint you enter; it does not verify the active gateway or prove gateway reachability.")?;
+
+    let first_external = prompt_target(reader, writer, "First external IP:PORT: ", "external")?;
+    let second_external = loop {
+        let candidate = prompt_target(reader, writer, "Second external IP:PORT: ", "external")?;
+        if candidate.ip() != first_external.ip() {
+            break candidate;
+        }
+        writeln!(
+            writer,
+            "Choose an external target with a different IP address."
+        )?;
+    };
+    let gateway = loop {
+        let candidate = prompt_optional_target(
+            reader,
+            writer,
+            "Optional gateway-role IP:PORT (press Enter to skip): ",
+            "gateway",
+        )?;
+        if candidate.is_some_and(|address| address == first_external || address == second_external)
+        {
+            writeln!(
+                writer,
+                "Choose a gateway-role IP:PORT different from the external targets."
+            )?;
+            continue;
+        }
+        break candidate;
+    };
+
+    write!(
+        writer,
+        "\nSuggested command (review it; setup will not start monitoring):\nnetforensics monitor --external '{first_external}' --external '{second_external}'"
+    )?;
+    if let Some(gateway) = gateway {
+        write!(writer, " --gateway '{gateway}'")?;
+    }
+    writeln!(writer)?;
+    writeln!(writer, "Running this command starts repeated probes to these configured endpoints and stores observations locally.")?;
+    Ok(())
+}
+
+fn prompt_target<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    prompt: &str,
+    role: &str,
+) -> io::Result<SocketAddr> {
+    loop {
+        write!(writer, "{prompt}")?;
+        writer.flush()?;
+        let mut input = String::new();
+        if reader.read_line(&mut input)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "no target was provided",
+            ));
+        }
+        match parse_probe_target(role, input.trim()) {
+            Ok(target) => return Ok(target.address),
+            Err(error) => writeln!(writer, "{error} Enter a numeric IP:PORT.")?,
+        }
+    }
+}
+
+fn prompt_optional_target<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    prompt: &str,
+    role: &str,
+) -> io::Result<Option<SocketAddr>> {
+    loop {
+        write!(writer, "{prompt}")?;
+        writer.flush()?;
+        let mut input = String::new();
+        if reader.read_line(&mut input)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "setup ended before target selection was complete",
+            ));
+        }
+        let input = input.trim();
+        if input.is_empty() {
+            return Ok(None);
+        }
+        match parse_probe_target(role, input) {
+            Ok(target) => return Ok(Some(target.address)),
+            Err(error) => writeln!(
+                writer,
+                "{error} Enter a numeric IP:PORT or press Enter to skip."
+            )?,
+        }
+    }
 }
 
 fn read_bounded<R: Read>(reader: R, maximum: usize) -> io::Result<Vec<u8>> {
@@ -1164,6 +1272,34 @@ mod tests {
     fn replay_file_reader_rejects_input_over_limit_without_reading_it_all() {
         let error = read_bounded(&b"12345"[..], 4).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn guided_setup_validates_targets_and_prints_reviewable_command() {
+        let answers = "example.com:443\n192.0.2.1:443\n192.0.2.1:8443\n198.51.100.2:443\n192.0.2.1:443\ninvalid\n[2001:db8::1]:443\n";
+        let mut input = io::Cursor::new(answers);
+        let mut output = Vec::new();
+        run_setup(&mut input, &mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("setup makes no network requests"));
+        assert!(output.contains("does not verify the active gateway"));
+        assert!(output.contains("Choose an external target with a different IP address."));
+        assert!(
+            output.contains("Choose a gateway-role IP:PORT different from the external targets.")
+        );
+        assert!(output.contains("netforensics monitor --external '192.0.2.1:443' --external '198.51.100.2:443' --gateway '[2001:db8::1]:443'"));
+        assert!(output.contains("setup will not start monitoring"));
+    }
+
+    #[test]
+    fn guided_setup_reports_end_of_input_without_starting_monitor() {
+        let mut input = io::Cursor::new("");
+        let mut output = Vec::new();
+        let error = run_setup(&mut input, &mut output).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(String::from_utf8(output)
+            .unwrap()
+            .contains("setup makes no network requests"));
     }
 
     #[test]

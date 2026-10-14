@@ -24,6 +24,10 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   reported speed, and the interface on the lowest-metric active default route
   when available. Missing sysfs/procfs values appear as unavailable. The
   command reads `/sys/class/net` and `/proc/net/route` only.
+- `netforensics setup` asks for two external endpoints on distinct IP
+  addresses and an optional gateway-role endpoint. It validates the values and
+  prints a reviewable monitor command without starting probes. The gateway
+  role remains a user-supplied label, not proof of the active gateway.
 - `netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]` attempts one
   TCP connection to an explicitly supplied numeric address. It does not resolve
   names or use default endpoints. The default timeout is 3000 ms, with a
@@ -103,11 +107,15 @@ cargo run -- monitor --help
 ```
 
 `interfaces` reads local Linux interface and route information; it does not
-probe the network. Before monitoring, choose two distinct numeric IP:port
-targets for external TCP services that you are allowed to contact and expect
-to accept connections. A gateway target is optional and is only a label for
-the endpoint you supply; the program does not verify that it is your gateway.
-There are no built-in probe destinations or automatic target discovery.
+probe the network. Before monitoring, choose two numeric IP:port targets on
+different IP addresses for external TCP services that you are allowed to
+contact and expect to accept connections. A gateway target is optional and is
+only a label for the endpoint you supply; the program does not verify that it
+is your gateway.
+`cargo run -- setup` interactively validates the two external targets and
+optional gateway-role endpoint, then prints a monitor command for review. It
+does not probe or start monitoring. There are no built-in probe destinations
+or automatic target discovery.
 
 The following is a command template, not a ready-to-run command. Replace both
 `<IP:PORT>` placeholders with your chosen targets before running it:
