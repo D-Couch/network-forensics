@@ -88,6 +88,7 @@ Read-only monitoring by default; no packet payload collection, network configura
 - [`docs/TESTING.md`](docs/TESTING.md): verification and fixture strategy.
 - [`docs/SECURITY_PRIVACY.md`](docs/SECURITY_PRIVACY.md): threat model and data-handling policy.
 - [`AGENTS.md`](AGENTS.md): persistent instructions for Codex.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): development checks, project boundaries, and contribution guidance.
 - [`tasks/0001-repository-foundation.md`](tasks/0001-repository-foundation.md): first narrowly scoped implementation task.
 
 ## Getting started

@@ -68,8 +68,7 @@ This section is the project’s single inventory of unimplemented product capabi
 
 ### Release preparation
 
-- Add contributor documentation.
-- Add contributor documentation.
+- [x] **Task 0023 — Contributor documentation:** document local checks, project boundaries, privacy-aware contributions, and source-only releases.
 
 ### Separate proposals
 
