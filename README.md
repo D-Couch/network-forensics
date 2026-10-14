@@ -42,7 +42,7 @@ Linux desktop users, developers, homelab operators, and support engineers invest
   validated against routing state.
 - `netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]` emits newline-delimited JSON interface snapshots, carrier/speed transitions, available RX/TX error/drop counter deltas, and probe results until Ctrl+C, and stores each cycle locally in SQLite. Kernel journal sampling is disabled by default and enabled only with `--kernel-journal`; only normalized link-up/down and watchdog categories are stored, and unavailable access does not stop monitoring. It requires two distinct external targets and accepts one optional gateway target. DNS is queried only when the single optional `--dns-name` is provided; it must be a fully qualified ASCII name ending in a dot, such as `example.com.`. The configured system nameserver setup is used; `/etc/hosts` is bypassed. TCP and DNS observations run sequentially with no application retry or overlapping rounds and use the configured bounded timeout. The interval is a pause after each round completes: it defaults to 10000 ms and is bounded to 1000–3600000 ms. A Ctrl+C waits for the in-progress bounded probe to finish.
 - `netforensics incidents [--since RFC3339] [--until RFC3339] [--target IP:PORT] [--compare]` reads the existing local database without creating or changing it, then lists incidents derived from the full retained probe history. Time bounds inclusively filter incident start times; target matches an exact numeric IP:port. `--compare` shows the same target's latest probe before the incident and the first recovery-streak success, when available. These observations do not establish a cause. The command makes no network connections and does not store derived incidents.
-- `netforensics analyze --latest` prints conservative findings for derived incidents. `netforensics report --latest` renders a text report; add `--format json` for versioned JSON. Target addresses are redacted to stable role-scoped labels by default. `--include-identifiers` includes configured target addresses and prints a warning to stderr. Reports retain event IDs and timestamps, omit raw event payloads and DNS query names, and read the database without modifying it.
+- `netforensics analyze --latest` prints conservative findings for derived incidents. `netforensics report --latest` renders a text report; add `--format json` for versioned JSON. Add `--output ./report.txt` to save one local report file; it refuses to overwrite an existing path, creates no parent directories, and limits output to 16 MiB. On Unix the file is private (`0600`). Target addresses are redacted to stable role-scoped labels by default. `--include-identifiers` includes configured target addresses and prints a warning to stderr. Reports retain event IDs and timestamps, omit raw event payloads and DNS query names, and read the database without modifying it. Incidents are recomputed from stored events and are not separately persisted.
 
 The incident lifecycle API analyzes stored/synthetic events without I/O. By default, two consecutive timeouts or network/host-unreachable results for the same role and IP:port within 30 seconds open an incident; two consecutive successful probes recover it. Refused, ambiguous, unsupported, or blocked outcomes do not qualify. Gaps over 60 seconds and backward timestamps reset streaks and are retained as uncertainty markers. Derived incidents are not separately persisted; each history query recomputes them from retained events.
 
@@ -150,7 +150,12 @@ cargo run -- status
 cargo run -- incidents
 cargo run -- analyze --latest
 cargo run -- report --latest
+cargo run -- report --latest --format json --output ./report.json
 ```
+
+Report export creates a new file and fails if the path already exists. Review
+the sanitized-by-default report before sharing it; raw target addresses require
+the explicit `--include-identifiers` option.
 
 To try the analysis without a database or network access, replay a checked-in
 scenario:

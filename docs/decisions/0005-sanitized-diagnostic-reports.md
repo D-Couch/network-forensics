@@ -1,6 +1,6 @@
 # ADR 0005 — Sanitized diagnostic reports
 
-**Status:** Accepted for Task 0011
+**Status:** Accepted for Task 0011; optional file output was added by Task 0030
 
 ## Context
 
@@ -13,7 +13,7 @@ Analysis findings currently exist only as a pure API. The PRD calls for readable
 - Redact target socket addresses by default with stable per-report role-scoped labels. JSON carries an `identifiers_included` marker.
 - Include raw configured target addresses only with `--include-identifiers`, and print a stderr warning when that flag is used.
 - Keep report content limited to incident summaries and findings. Do not include DNS query names or raw event payloads; retain evidence event IDs to support review against local history.
-- Keep report construction and serialization pure. Commands do not modify the database or create report files.
+- Keep report construction and serialization pure. Task 0011 wrote reports only to stdout and did not modify the database or create files; Task 0030 later adds a separate explicit file-output path without changing the report model.
 
 ## Consequences
 
@@ -23,4 +23,4 @@ Default reports are suitable for sharing with less risk of disclosing configured
 
 - Always include raw values: rejected because users may share reports without noticing identifying addresses.
 - Omit evidence IDs: rejected because findings would be harder to verify against local history.
-- Add an export-file workflow: deferred; stdout keeps this task read-only and avoids overwrite/path handling.
+- Add an export-file workflow: deferred during Task 0011; Task 0030 later adds the separately scoped, explicit, no-overwrite workflow in [ADR 0008](0008-local-report-file-export.md).

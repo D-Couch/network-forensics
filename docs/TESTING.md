@@ -58,12 +58,16 @@ history compatibility, and cautious DNS analysis with independent TCP success.
 Report tests exercise pure text/JSON rendering, empty history, sequence and
 evidence citations, stable target redaction, explicit raw-identifier opt-in,
 CLI option validation, and analysis over read-only paged stored events. They
-must not open the default database or make network requests.
+must not open the default database or make network requests. Report file-output
+tests cover output-size bounds, no-overwrite behavior, complete file visibility,
+temporary-file cleanup, and Unix permissions.
 
 Status tests use in-memory history to check empty and populated summaries,
 explicit unknown interface/counter values, optional-signal absence wording,
-insertion ordering, DNS query-name omission, and read-only behavior. They must
-not inspect running processes, open the default database, or access the network.
+insertion ordering, DNS query-name omission, and read-only behavior. Monitor
+lifecycle tests use temporary files to check Linux locks, active/stopped state,
+configuration validation, symlinks, and private permissions. These tests must
+not open the default database or access the network.
 
 The event store tests use in-memory SQLite or temporary files. They cover
 schema migration and rejection, durable reopen and sequence paging, atomic

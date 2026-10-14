@@ -9,6 +9,7 @@ pub mod monitor_state;
 pub mod probes;
 pub mod replay;
 pub mod report;
+pub mod report_output;
 pub mod storage;
 
 use crate::event::{
@@ -26,10 +27,11 @@ use std::env;
 use std::fs::File;
 use std::io::{self, BufRead, Read, Write};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents [--since RFC3339] [--until RFC3339] [--target IP:PORT] [--compare]\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n  netforensics replay <FIXTURE.json>\n  netforensics setup\n\nCommands:\n  status           Summarize retained observations and monitor state/configuration\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Filter incidents and compare same-target probes\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n  setup            Guide target selection and print a monitor command\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms; it is a pause after a completed round, not the per-target probe period. Each configured TCP target is attempted once per round, sequentially, without application retries, so the time between attempts to a target also includes the round duration. Use targets you are permitted to contact and that are expected to accept TCP on the selected port; increase --interval-ms to reduce request frequency and respect target owners' policies. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, replay, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents [--since RFC3339] [--until RFC3339] [--target IP:PORT] [--compare]\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers] [--output FILE]\n  netforensics replay <FIXTURE.json>\n  netforensics setup\n\nCommands:\n  status           Summarize retained observations and monitor state/configuration\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Filter incidents and compare same-target probes\n  analyze          Analyze the latest retained local event history\n  report           Render or save a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n  setup            Guide target selection and print a monitor command\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n  --output FILE          Write a new report file without overwriting an existing path\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms; it is a pause after a completed round, not the per-target probe period. Each configured TCP target is attempted once per round, sequentially, without application retries, so the time between attempts to a target also includes the round duration. Use targets you are permitted to contact and that are expected to accept TCP on the selected port; increase --interval-ms to reduce request frequency and respect target owners' policies. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, and report commands read the event database without modifying it. --output writes one new local report file and refuses to overwrite an existing path. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -690,10 +692,11 @@ enum ReportFormat {
     Json,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ReportOptions {
     format: ReportFormat,
     include_identifiers: bool,
+    output: Option<PathBuf>,
 }
 
 fn parse_report_args(args: &[String]) -> Result<ReportOptions, String> {
@@ -703,10 +706,12 @@ fn parse_report_args(args: &[String]) -> Result<ReportOptions, String> {
     let mut options = ReportOptions {
         format: ReportFormat::Text,
         include_identifiers: false,
+        output: None,
     };
     let mut index = 1;
     let mut format_seen = false;
     let mut identifiers_seen = false;
+    let mut output_seen = false;
     while index < args.len() {
         match args[index].as_str() {
             "--format" => {
@@ -732,6 +737,18 @@ fn parse_report_args(args: &[String]) -> Result<ReportOptions, String> {
                 identifiers_seen = true;
                 index += 1;
             }
+            "--output" => {
+                if output_seen {
+                    return Err("--output may be specified only once".to_owned());
+                }
+                let value = args
+                    .get(index + 1)
+                    .filter(|value| !value.is_empty() && !value.starts_with("--"))
+                    .ok_or_else(|| "missing path for --output".to_owned())?;
+                options.output = Some(PathBuf::from(value));
+                output_seen = true;
+                index += 2;
+            }
             option => return Err(format!("unknown report option {option}")),
         }
     }
@@ -746,11 +763,19 @@ fn run_report_latest(options: ReportOptions) -> Result<(), HistoryError> {
         &history.findings,
         options.include_identifiers,
     );
-    let rendered = match options.format {
+    let mut rendered = match options.format {
         ReportFormat::Text => report::render_text(&report),
         ReportFormat::Json => report::render_json(&report).map_err(HistoryError::Json)?,
     };
-    println!("{rendered}");
+    if !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    if let Some(path) = options.output {
+        report_output::write_report(&path, &rendered).map_err(HistoryError::Io)?;
+        println!("Report written to {}", path.display());
+    } else {
+        print!("{rendered}");
+    }
     Ok(())
 }
 
@@ -760,6 +785,7 @@ enum HistoryError {
     Incident(IncidentError),
     Analysis(analysis::AnalysisError),
     Json(serde_json::Error),
+    Io(io::Error),
 }
 
 impl std::fmt::Display for HistoryError {
@@ -769,6 +795,7 @@ impl std::fmt::Display for HistoryError {
             Self::Incident(error) => error.fmt(formatter),
             Self::Analysis(error) => error.fmt(formatter),
             Self::Json(error) => error.fmt(formatter),
+            Self::Io(error) => error.fmt(formatter),
         }
     }
 }
@@ -1260,11 +1287,17 @@ mod tests {
             ReportOptions {
                 format: ReportFormat::Text,
                 include_identifiers: false,
+                output: None,
             }
         );
         let json = ["--latest", "--format", "json"];
         let json = json.map(str::to_owned);
         assert_eq!(parse_report_args(&json).unwrap().format, ReportFormat::Json);
+        let output = ["--latest", "--output", "report.txt"].map(str::to_owned);
+        assert_eq!(
+            parse_report_args(&output).unwrap().output,
+            Some(PathBuf::from("report.txt"))
+        );
         let raw = ["--latest", "--include-identifiers"].map(str::to_owned);
         assert!(parse_report_args(&raw).unwrap().include_identifiers);
         for args in [
@@ -1276,6 +1309,14 @@ mod tests {
                 "--latest".into(),
                 "--include-identifiers".into(),
                 "--include-identifiers".into(),
+            ],
+            vec!["--latest".into(), "--output".into()],
+            vec![
+                "--latest".into(),
+                "--output".into(),
+                "report.txt".into(),
+                "--output".into(),
+                "second.txt".into(),
             ],
         ] {
             assert!(parse_report_args(&args).is_err());

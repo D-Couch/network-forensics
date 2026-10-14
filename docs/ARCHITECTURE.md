@@ -23,6 +23,7 @@ The collectors emit *observations*, not conclusions. The incident detector corre
 
 - `main.rs`: current command parsing and user-facing output, including read-only `status` and interactive target `setup`; setup prints a command but does not start monitoring.
 - `monitor_state`: Linux advisory-lock lifecycle detection and a bounded, validated private monitor-configuration record.
+- `report_output`: bounded local report-file creation with private permissions and no-overwrite behavior.
 - `event`: typed, versioned observation events (implemented).
 - `interfaces`: Linux interface state and default-route discovery (implemented).
 - `probes` and `dns`: explicit TCP checks and opt-in system-configured DNS lookups (implemented).
@@ -43,6 +44,12 @@ perform no network activity. Reports map each distinct target consistently to
 a role-scoped label; `--include-identifiers` includes raw target addresses and
 prints a sharing warning to stderr. Report bodies contain event IDs and
 timestamps for evidence review but omit DNS query names and raw event payloads.
+`report --latest --output FILE` optionally writes the same text or JSON report
+to a new local file. The writer caps output at 16 MiB, stages the complete
+report in a private temporary file, and links it into place without replacing
+an existing destination. It sets `0600` permissions on Unix and does not create
+parent directories. Derived incidents continue to be recomputed from retained
+observations rather than persisted separately.
 
 `status` pages the existing database in insertion order and summarizes its
 latest event, probe, interface snapshot/counter sample, and optional DNS and

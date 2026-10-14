@@ -52,6 +52,7 @@ events, without persisting derived incident records.
 - [x] **Task 0027 — Apply age retention to new events:** discard incoming events older than the configured cutoff.
 - [x] **Task 0028 — Preserve incompatible database files:** inspect existing schema versions read-only before changing file permissions.
 - [x] **Task 0029 — Status lifecycle and configuration:** report a running foreground monitor and its validated configuration through a private Linux advisory lock record.
+- [x] **Task 0030 — Local report-file export:** write bounded text or JSON reports to a new caller-selected file; continue recomputing derived incidents.
 
 **M4 exit:** An unrelated Linux user can install, monitor, investigate a problem, and share a sanitized report with documented limitations.
 
@@ -65,7 +66,6 @@ This section is the project’s single inventory of unimplemented product capabi
 
 ### Core capability and reliability
 
-- Consider persistence of derived incidents and file export for reports. ([Task 0030](../tasks/0030-derived-incident-persistence-and-export.md))
 - Harden bounded queues and backpressure, retention and size limits, privilege checks, suspend/resume gap reporting, and privacy-safe exports. ([Task 0031](../tasks/0031-reliability-hardening.md))
 - Add further interface evidence rules and richer route-change diagnostics. ([Task 0032](../tasks/0032-interface-and-route-evidence.md))
 - Consider Wi-Fi and VPN-specific correlation and comparative multi-interface incidents. ([Task 0033](../tasks/0033-wifi-vpn-and-multi-interface-correlation.md))
