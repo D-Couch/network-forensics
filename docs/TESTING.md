@@ -76,7 +76,11 @@ default event database.
 Incident history CLI tests use in-memory or temporary SQLite stores. They cover
 empty history, rendered evidence and status, continuation across event-page
 boundaries, missing-database behavior, and that read-only access cannot write
-or alter the schema. They must not open the default user database.
+or alter the schema. Filter tests cover inclusive time bounds, exact target
+matching, invalid and duplicate options, and prove filtering is applied after
+full-history lifecycle analysis. Comparison tests cover same-target observations
+before a recovered incident and the absence of an after-recovery observation
+for open incidents. They must not open the default user database.
 
 Analysis tests use synthetic ordered event streams and lifecycle incidents.
 They cover carrier-down and normalized kernel link-down/watchdog evidence,

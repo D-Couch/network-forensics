@@ -20,6 +20,7 @@ use crate::probes::{ProbeConfig, ProbeRunner, ProbeTarget, SystemClock, SystemTr
 use crate::storage::{
     EventStore, RetentionPolicy, StorageError, DEFAULT_MAX_EVENTS, DEFAULT_RETENTION_DAYS,
 };
+use chrono::{DateTime, Utc};
 use std::env;
 use std::fs::File;
 use std::io::{self, BufRead, Read, Write};
@@ -27,7 +28,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n  netforensics replay <FIXTURE.json>\n  netforensics setup\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Show incidents derived from locally stored probe events\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n  setup            Guide target selection and print a monitor command\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, replay, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
+const HELP: &str = "Network Forensics (netforensics)\n\nA local network diagnostics tool. Interface inventory, explicit one-shot TCP probes, foreground monitoring, local incident history, analysis, and reports are available.\n\nUsage:\n  netforensics [--help] [--version]\n  netforensics status\n  netforensics interfaces\n  netforensics probe <gateway|external> <IP:PORT> [TIMEOUT_MS]\n  netforensics monitor --external <IP:PORT> --external <IP:PORT> [--gateway <IP:PORT>] [--dns-name <FQDN>] [--kernel-journal] [--interval-ms MS] [--timeout-ms MS] [--retention-days DAYS] [--max-events COUNT]\n  netforensics incidents [--since RFC3339] [--until RFC3339] [--target IP:PORT] [--compare]\n  netforensics analyze --latest\n  netforensics report --latest [--format text|json] [--include-identifiers]\n  netforensics replay <FIXTURE.json>\n  netforensics setup\n\nCommands:\n  status           Summarize latest retained observations (not live monitor state)\n  interfaces       List local interfaces and the detected default route\n  probe            Attempt one TCP connection to the explicitly supplied IP:port\n  monitor          Emit and save interface/probe observations until Ctrl+C\n  incidents        Filter incidents and compare same-target probes\n  analyze          Analyze the latest retained local event history\n  report           Render a text or JSON report from local event history\n  replay           Analyze a versioned fixture offline\n  setup            Guide target selection and print a monitor command\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n  --include-identifiers  Include configured target addresses in a report\n  --kernel-journal       Opt in to normalized kernel link signals (journalctl)\n\nProbe timeout defaults to 3000 ms and must be between 1 and 30000 ms. Monitor interval defaults to 10000 ms and must be between 1000 and 3600000 ms. Retention defaults to 30 days (range 1–3650) or 100000 events (range 1–1000000), with a 256 MiB database limit. All TCP probe targets must be numeric IP addresses. DNS is queried only when --dns-name is explicitly supplied; it must be a fully qualified ASCII name ending in a dot. The name and answer count are stored locally, but returned IP addresses are not. History, analysis, replay, and report commands are read-only. Reports redact target addresses by default; use --include-identifiers only when raw addresses are appropriate to share. Replay reads one local JSON fixture and performs no networking.\n";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -46,8 +47,18 @@ fn main() {
         [command, flag] if command == "status" && (flag == "--help" || flag == "-h") => {
             print!("{HELP}");
         }
-        [command] if command == "incidents" => {
-            if let Err(error) = run_incidents() {
+        [command, flag] if command == "incidents" && (flag == "--help" || flag == "-h") => {
+            print!("{HELP}");
+        }
+        [command, rest @ ..] if command == "incidents" => {
+            let options = match parse_incident_args(rest) {
+                Ok(options) => options,
+                Err(error) => {
+                    eprintln!("Invalid incident filters: {error}\n\n{HELP}");
+                    std::process::exit(2);
+                }
+            };
+            if let Err(error) = run_incidents(options) {
                 eprintln!("Could not read incident history: {error}");
                 std::process::exit(1);
             }
@@ -147,11 +158,112 @@ fn main() {
     }
 }
 
-fn run_incidents() -> Result<(), Box<dyn std::error::Error>> {
+fn run_incidents(options: IncidentOptions) -> Result<(), Box<dyn std::error::Error>> {
     let store = EventStore::open_default_read_only()?;
-    let incidents = load_incidents(&store)?;
-    print_incidents(&incidents);
+    let events = load_events(&store)?;
+    let incidents = analyze_events(&events, crate::incidents::IncidentConfig::default())?;
+    let incidents = filter_incidents(&incidents, options);
+    println!("{}", render_incident_history(&events, &incidents, options));
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct IncidentOptions {
+    since: Option<DateTime<Utc>>,
+    until: Option<DateTime<Utc>>,
+    target: Option<SocketAddr>,
+    compare: bool,
+}
+
+fn parse_incident_args(args: &[String]) -> Result<IncidentOptions, String> {
+    let mut options = IncidentOptions::default();
+    let mut since_seen = false;
+    let mut until_seen = false;
+    let mut target_seen = false;
+    let mut compare_seen = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--since" => {
+                if since_seen {
+                    return Err("--since may be specified only once".to_owned());
+                }
+                options.since = Some(parse_rfc3339_filter(
+                    "--since",
+                    args.get(index + 1)
+                        .ok_or_else(|| "missing value for --since".to_owned())?,
+                )?);
+                since_seen = true;
+                index += 2;
+            }
+            "--until" => {
+                if until_seen {
+                    return Err("--until may be specified only once".to_owned());
+                }
+                options.until = Some(parse_rfc3339_filter(
+                    "--until",
+                    args.get(index + 1)
+                        .ok_or_else(|| "missing value for --until".to_owned())?,
+                )?);
+                until_seen = true;
+                index += 2;
+            }
+            "--target" => {
+                if target_seen {
+                    return Err("--target may be specified only once".to_owned());
+                }
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --target".to_owned())?;
+                options.target = Some(value.parse().map_err(|_| {
+                    "target must be a numeric IP address with a port (IP:PORT)".to_owned()
+                })?);
+                target_seen = true;
+                index += 2;
+            }
+            "--compare" => {
+                if compare_seen {
+                    return Err("--compare may be specified only once".to_owned());
+                }
+                options.compare = true;
+                compare_seen = true;
+                index += 1;
+            }
+            option => return Err(format!("unknown incident option {option}")),
+        }
+    }
+    if options
+        .since
+        .zip(options.until)
+        .is_some_and(|(since, until)| since > until)
+    {
+        return Err("--since must be earlier than or equal to --until".to_owned());
+    }
+    Ok(options)
+}
+
+fn parse_rfc3339_filter(option: &str, value: &str) -> Result<DateTime<Utc>, String> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|_| format!("{option} must be an RFC3339 timestamp"))
+}
+
+fn filter_incidents(incidents: &[Incident], options: IncidentOptions) -> Vec<Incident> {
+    incidents
+        .iter()
+        .filter(|incident| {
+            options
+                .since
+                .is_none_or(|since| incident.started_at_utc >= since)
+                && options
+                    .until
+                    .is_none_or(|until| incident.started_at_utc <= until)
+                && options
+                    .target
+                    .is_none_or(|target| incident.target.address == target)
+        })
+        .cloned()
+        .collect()
 }
 
 #[derive(Default)]
@@ -395,13 +507,6 @@ fn describe_dns_outcome(outcome: &DnsOutcome) -> String {
         DnsOutcome::Failure(category) => format!("failure ({category:?})"),
         DnsOutcome::UnsupportedOrBlocked(category) => format!("unavailable ({category:?})"),
     }
-}
-
-fn load_incidents(store: &EventStore) -> Result<Vec<Incident>, HistoryError> {
-    Ok(analyze_events(
-        &load_events(store)?,
-        crate::incidents::IncidentConfig::default(),
-    )?)
 }
 
 fn load_events(store: &EventStore) -> Result<Vec<storage::StoredEvent>, StorageError> {
@@ -694,10 +799,6 @@ impl From<serde_json::Error> for HistoryError {
     }
 }
 
-fn print_incidents(incidents: &[Incident]) {
-    println!("{}", render_incidents(incidents));
-}
-
 fn render_incidents(incidents: &[Incident]) -> String {
     if incidents.is_empty() {
         return "No probe incidents found in local event history.".to_owned();
@@ -764,6 +865,106 @@ fn render_incidents(incidents: &[Incident]) -> String {
         }
     }
     output
+}
+
+fn render_incident_history(
+    events: &[storage::StoredEvent],
+    incidents: &[Incident],
+    options: IncidentOptions,
+) -> String {
+    if incidents.is_empty() {
+        let filters_active =
+            options.since.is_some() || options.until.is_some() || options.target.is_some();
+        return if filters_active {
+            "No probe incidents match the selected filters.".to_owned()
+        } else {
+            render_incidents(incidents)
+        };
+    }
+
+    let mut output = render_incidents(incidents);
+    if !options.compare {
+        return output;
+    }
+    for incident in incidents {
+        use std::fmt::Write as _;
+        writeln!(
+            output,
+            "\n{} probe comparison (same configured target; not a cause):",
+            incident.id
+        )
+        .unwrap();
+        let before = events.iter().rev().find(|stored| {
+            stored.sequence < incident.started_sequence
+                && target_probe_outcome(stored, incident).is_some()
+        });
+        match before {
+            Some(stored) => writeln!(
+                output,
+                "  Before incident: {}",
+                render_probe_comparison_event(stored, incident)
+            )
+            .unwrap(),
+            None => writeln!(
+                output,
+                "  Before incident: no earlier probe for this target retained"
+            )
+            .unwrap(),
+        }
+
+        if incident.status == IncidentStatus::Open {
+            writeln!(
+                output,
+                "  After recovery: unavailable (incident remains open)"
+            )
+            .unwrap();
+        } else if let Some(first_recovery_id) = incident.recovery_event_ids.first() {
+            if let Some(stored) = events
+                .iter()
+                .find(|stored| &stored.event.id == first_recovery_id)
+            {
+                writeln!(
+                    output,
+                    "  After recovery: {}",
+                    render_probe_comparison_event(stored, incident)
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    output,
+                    "  After recovery: recovery observation is no longer retained"
+                )
+                .unwrap();
+            }
+        }
+    }
+    output
+}
+
+fn target_probe_outcome<'a>(
+    stored: &'a storage::StoredEvent,
+    incident: &Incident,
+) -> Option<&'a ProbeOutcome> {
+    match &stored.event.kind {
+        EventKind::ProbeResult {
+            role,
+            target,
+            outcome,
+            ..
+        } if *role == incident.target.role && *target == incident.target.address => Some(outcome),
+        _ => None,
+    }
+}
+
+fn render_probe_comparison_event(stored: &storage::StoredEvent, incident: &Incident) -> String {
+    let outcome = target_probe_outcome(stored, incident).expect("matching probe event");
+    format!(
+        "{} at {} (sequence {}, event {})",
+        describe_probe_outcome(outcome),
+        stored.event.recorded_at_utc,
+        stored.sequence,
+        format_evidence_ids(std::slice::from_ref(&stored.event.id))
+    )
 }
 
 fn format_evidence_ids(ids: &[String]) -> String {
@@ -1082,6 +1283,135 @@ mod tests {
     }
 
     #[test]
+    fn incident_filter_parser_validates_timestamps_target_and_duplicates() {
+        let valid = [
+            "--since",
+            "2026-10-13T12:00:00-05:00",
+            "--until",
+            "2026-10-13T18:00:00Z",
+            "--target",
+            "192.0.2.8:443",
+            "--compare",
+        ]
+        .map(str::to_owned);
+        let options = parse_incident_args(&valid).unwrap();
+        assert_eq!(
+            options.since.unwrap().to_rfc3339(),
+            "2026-10-13T17:00:00+00:00"
+        );
+        assert_eq!(options.target.unwrap(), "192.0.2.8:443".parse().unwrap());
+        assert!(options.compare);
+
+        for invalid in [
+            vec!["--since".into(), "yesterday".into()],
+            vec!["--until".into()],
+            vec!["--target".into(), "example.com:443".into()],
+            vec!["--compare".into(), "--compare".into()],
+            vec![
+                "--since".into(),
+                "2026-10-14T00:00:00Z".into(),
+                "--until".into(),
+                "2026-10-13T00:00:00Z".into(),
+            ],
+            vec![
+                "--target".into(),
+                "192.0.2.1:443".into(),
+                "--target".into(),
+                "192.0.2.2:443".into(),
+            ],
+        ] {
+            assert!(
+                parse_incident_args(&invalid).is_err(),
+                "accepted {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn incident_filters_are_inclusive_exact_and_comparison_uses_target_probes() {
+        let events = vec![
+            history_event_for(
+                "before-a",
+                "192.0.2.8:443",
+                ProbeOutcome::Success,
+                "2026-10-13T12:00:00Z",
+            ),
+            history_event_for(
+                "fail-a1",
+                "192.0.2.8:443",
+                ProbeOutcome::Timeout,
+                "2026-10-13T12:00:10Z",
+            ),
+            history_event_for(
+                "fail-a2",
+                "192.0.2.8:443",
+                ProbeOutcome::Timeout,
+                "2026-10-13T12:00:20Z",
+            ),
+            history_event_for(
+                "recover-a1",
+                "192.0.2.8:443",
+                ProbeOutcome::Success,
+                "2026-10-13T12:00:30Z",
+            ),
+            history_event_for(
+                "recover-a2",
+                "192.0.2.8:443",
+                ProbeOutcome::Success,
+                "2026-10-13T12:00:40Z",
+            ),
+            history_event_for(
+                "fail-b1",
+                "192.0.2.9:443",
+                ProbeOutcome::Timeout,
+                "2026-10-13T12:01:00Z",
+            ),
+            history_event_for(
+                "fail-b2",
+                "192.0.2.9:443",
+                ProbeOutcome::Timeout,
+                "2026-10-13T12:01:10Z",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, event)| storage::StoredEvent {
+            sequence: index as i64 + 1,
+            event,
+        })
+        .collect::<Vec<_>>();
+        let incidents =
+            analyze_events(&events, crate::incidents::IncidentConfig::default()).unwrap();
+        assert_eq!(incidents.len(), 2);
+
+        let start = "2026-10-13T12:00:10Z".parse().unwrap();
+        let filtered = filter_incidents(
+            &incidents,
+            IncidentOptions {
+                since: Some(start),
+                until: Some(start),
+                target: Some("192.0.2.8:443".parse().unwrap()),
+                compare: false,
+            },
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, incidents[0].id);
+
+        let output = render_incident_history(
+            &events,
+            &incidents,
+            IncidentOptions {
+                compare: true,
+                ..IncidentOptions::default()
+            },
+        );
+        assert!(output.contains("Before incident: success"));
+        assert!(output.contains("After recovery: success"));
+        assert!(output.contains("After recovery: unavailable (incident remains open)"));
+        assert!(output.contains("same configured target; not a cause"));
+    }
+
+    #[test]
     fn monitor_parser_accepts_and_validates_retention_options() {
         let args = [
             "--external".to_owned(),
@@ -1127,6 +1457,22 @@ mod tests {
                 outcome,
             },
         }
+    }
+
+    fn history_event_for(id: &str, target: &str, outcome: ProbeOutcome, at: &str) -> Event {
+        let at = at.parse().unwrap();
+        let mut event = history_event(id.to_owned(), outcome);
+        event.recorded_at_utc = at;
+        if let EventKind::ProbeResult {
+            target: event_target,
+            started_at_utc,
+            ..
+        } = &mut event.kind
+        {
+            *event_target = target.parse().unwrap();
+            *started_at_utc = at;
+        }
+        event
     }
 
     fn status_event(id: &str, kind: EventKind) -> Event {
@@ -1218,7 +1564,11 @@ mod tests {
     #[test]
     fn incident_history_reports_empty_database_clearly() {
         let store = EventStore::open_in_memory(RetentionPolicy::default()).unwrap();
-        let incidents = load_incidents(&store).unwrap();
+        let incidents = analyze_events(
+            &load_events(&store).unwrap(),
+            crate::incidents::IncidentConfig::default(),
+        )
+        .unwrap();
         assert!(incidents.is_empty());
         assert_eq!(
             render_incidents(&incidents),
@@ -1314,7 +1664,11 @@ mod tests {
             .store_events_at(&events, "2026-10-13T00:00:00Z".parse().unwrap())
             .unwrap();
 
-        let incidents = load_incidents(&store).unwrap();
+        let incidents = analyze_events(
+            &load_events(&store).unwrap(),
+            crate::incidents::IncidentConfig::default(),
+        )
+        .unwrap();
         assert_eq!(incidents.len(), 1);
         let output = render_incidents(&incidents);
         assert!(output.contains("incident-1000 [OPEN]"));
