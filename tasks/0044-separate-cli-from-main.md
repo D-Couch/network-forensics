@@ -1,6 +1,6 @@
 # Task 0044 — Separate CLI responsibilities from main.rs
 
-**Status:** Proposed (not assigned)
+**Status:** Complete
 **Milestone:** Maintainability
 **Scope:** Refactor CLI parsing, command dispatch, and command-specific rendering/orchestration out of `src/main.rs` into cohesive Rust modules. Keep one Cargo package and preserve behavior. Do not add commands or features.
 

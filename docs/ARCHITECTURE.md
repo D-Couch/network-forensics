@@ -23,7 +23,7 @@ The monitor collects configured observations sequentially, commits each complete
 
 ### 2. Modules
 
-- `main.rs`: crate root and executable entry point. It declares the public library modules and currently owns command dispatch, argument parsing, command orchestration, help text, and user-facing rendering for all CLI commands, including `interfaces`, `probe`, `monitor`, `status`, `setup`, `incidents`, `analyze`, `report`, and `replay`. This is the current organization; CLI extraction is proposed as [Task 0044](../tasks/0044-separate-cli-from-main.md).
+- `main.rs`: crate root and thin executable entry point. It declares the public application modules and delegates execution to `cli`; the crate-root event-ID helper remains re-exported for the monitor. `cli`: command dispatch and help text in `cli/mod.rs`, pure option parsing in `cli/args.rs`, command orchestration and local I/O in `cli/commands.rs`, user-facing output construction in `cli/render.rs`, and shared status data in `cli/types.rs`. The boundaries keep argument parsing and rendering separately reviewable from database, filesystem, and network actions.
 - `monitor`: validates monitor configuration, schedules sequential rounds, handles cancellation, coordinates collectors, tracks interface transitions and monitoring gaps, commits complete event cycles, then writes JSON Lines output. Its cycle and runner responsibilities currently share this module; a focused split is proposed as [Task 0045](../tasks/0045-split-monitor-responsibilities.md).
 - `interfaces`: reads Linux interface state and default-route information from local system interfaces.
 - `probes` and `dns`: perform explicit TCP connection attempts and opt-in system-configured DNS lookups.

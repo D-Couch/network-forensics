@@ -80,14 +80,14 @@ This section is the project’s single inventory of unimplemented product capabi
 ### Maintainability and documentation
 
 The following work comes from a read-only structure review. Tasks 0040–0043
-are complete; Tasks 0044–0045 are proposed and unassigned. They are ordered so
-documentation clarifies the current structure before the larger code refactors.
+are complete; Task 0044 is complete and Task 0045 remains proposed. The tasks
+clarify the current structure before the larger code refactor.
 
 - [x] **Task 0040 — Clarify architecture documentation:** distinguish implemented architecture from design constraints and future direction. ([Task 0040](../tasks/0040-clarify-architecture-documentation.md))
 - [x] **Task 0041 — Add a task index and lifecycle conventions:** improve navigation and document status metadata without duplicating roadmap status. ([Task 0041](../tasks/0041-task-index-and-lifecycle-conventions.md))
 - [x] **Task 0042 — Improve README navigation:** make the user quick-start and reference paths easier to find while preserving safety and privacy guidance. ([Task 0042](../tasks/0042-improve-readme-navigation.md))
 - [x] **Task 0043 — Clarify PRD status references:** keep requirements authoritative while reducing duplicated implementation-status detail. ([Task 0043](../tasks/0043-clarify-prd-status-references.md))
-- **Task 0044 — Separate CLI responsibilities from main.rs:** make the executable entry point thin and isolate CLI concerns without changing behavior or creating another crate. ([Task 0044](../tasks/0044-separate-cli-from-main.md))
+- [x] **Task 0044 — Separate CLI responsibilities from main.rs:** make the executable entry point thin and isolate CLI concerns without changing behavior or creating another crate. ([Task 0044](../tasks/0044-separate-cli-from-main.md))
 - **Task 0045 — Split monitor collection responsibilities:** extract cohesive monitor concerns while preserving a small orchestration layer and existing behavior. ([Task 0045](../tasks/0045-split-monitor-responsibilities.md))
 
 ### Separate proposals
