@@ -1,6 +1,6 @@
 # Technical Architecture
 
-**Status:** Describes the implemented single-package CLI and monitoring architecture through Tasks 0001–0039. Sections labeled “Implemented architecture” describe current behavior; “Design constraints and future direction” records boundaries and guidance that may extend beyond current implementation. The roadmap is the planning inventory.
+**Status:** Describes the implemented single-package CLI and monitoring architecture through Tasks 0001–0045. Sections labeled “Implemented architecture” describe current behavior; “Design constraints and future direction” records boundaries and guidance that may extend beyond current implementation. The roadmap is the planning inventory.
 
 ## Implemented architecture
 
@@ -24,7 +24,7 @@ The monitor collects configured observations sequentially, commits each complete
 ### 2. Modules
 
 - `main.rs`: crate root and thin executable entry point. It declares the public application modules and delegates execution to `cli`; the crate-root event-ID helper remains re-exported for the monitor. `cli`: command dispatch and help text in `cli/mod.rs`, pure option parsing in `cli/args.rs`, command orchestration and local I/O in `cli/commands.rs`, user-facing output construction in `cli/render.rs`, and shared status data in `cli/types.rs`. The boundaries keep argument parsing and rendering separately reviewable from database, filesystem, and network actions.
-- `monitor`: validates monitor configuration, schedules sequential rounds, handles cancellation, coordinates collectors, tracks interface transitions and monitoring gaps, commits complete event cycles, then writes JSON Lines output. Its cycle and runner responsibilities currently share this module; a focused split is proposed as [Task 0045](../tasks/0045-split-monitor-responsibilities.md).
+- `monitor`: coordinates foreground round scheduling, cancellation, collector ordering, cycle persistence, and JSON Lines output. `monitor::config` validates settings and owns monitor limits; `monitor::cycle` tracks interface transitions and collects per-round interface, TCP, and optional DNS events; `monitor::gap` detects elapsed gaps using the boot-time clock. The public configuration and collection APIs remain re-exported from `monitor`.
 - `interfaces`: reads Linux interface state and default-route information from local system interfaces.
 - `probes` and `dns`: perform explicit TCP connection attempts and opt-in system-configured DNS lookups.
 - `journal`: optionally reads and normalizes selected kernel link messages; it does not persist raw journal messages.

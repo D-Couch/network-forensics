@@ -1,6 +1,6 @@
 # Task 0045 — Split monitor collection responsibilities
 
-**Status:** Proposed (not assigned)
+**Status:** Complete
 **Milestone:** Maintainability
 **Scope:** Refactor `src/monitor.rs` along existing collection responsibilities into cohesive modules while retaining a clear monitor orchestration layer. Preserve behavior; do not add collection signals or change scheduling policy.
 
