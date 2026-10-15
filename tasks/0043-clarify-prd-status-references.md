@@ -1,6 +1,6 @@
 # Task 0043 — Clarify PRD status references
 
-**Status:** Proposed (not assigned)
+**Status:** Complete
 **Milestone:** Maintainability
 **Scope:** Reduce unnecessary duplication of implementation status in `docs/PRD.md` while preserving requirements and constraints. Do not change product scope or make the roadmap a source of requirements.
 
