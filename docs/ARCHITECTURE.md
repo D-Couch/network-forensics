@@ -1,38 +1,43 @@
 # Technical Architecture
 
-**Status:** Describes the implemented M1 CLI, Tasks 0005–0014, and intended future architecture. Implemented behavior is labeled below; other sections describe targets, not existing components.
+**Status:** Describes the implemented single-package CLI and monitoring architecture through Tasks 0001–0039. Sections labeled “Implemented architecture” describe current behavior; “Design constraints and future direction” records boundaries and guidance that may extend beyond current implementation. The roadmap is the planning inventory.
 
-## 1. Logical flow
+## Implemented architecture
+
+### 1. Logical flow
 
 ```text
-Current:
-[Linux interface observer] --\
-                              +--> [cycle events] --> [SQLite] --> [JSON Lines stdout]
-[Explicit TCP and opt-in DNS probe runners] -/
+monitor command:
+[interface discovery/tracking] --\
+[explicit TCP probes] ------------+--> [ordered cycle events] --> [SQLite transaction]
+[opt-in DNS and journal signals] -/                                  |
+                                                        [JSON Lines stdout]
 
-Target:
-[Observation events] --> [local event store] --> [incident detector]
-                                                   --> [diagnostic rules]
-                                                   --> [report/export CLI]
-[Versioned replay fixtures] ----------------------> [same analysis pipeline]
+database-backed commands:
+[SQLite event history] --> [incident lifecycle] --> [analysis] --> [CLI output]
+                                                                  \--> [optional report file]
+[local replay fixture] ---------------------------> [same incident and analysis APIs]
 ```
 
-The collectors emit *observations*, not conclusions. The incident detector correlates events and produces incident boundaries; the separate rule engine evaluates possible fault domains. The storage layer should not dictate diagnostic rules.
+The monitor collects configured observations sequentially, commits each complete cycle, and then writes its events to stdout. The collectors emit *observations*, not conclusions. The incident detector derives incident boundaries from stored events; the separate rule engine evaluates possible fault domains. Replay uses the same incident and analysis APIs without the database or network.
 
-## 2. Modules (logical, not mandatory crates)
+### 2. Modules
 
-- `main.rs`: current command parsing and user-facing output, including read-only `status` and interactive target `setup`; setup prints a command but does not start monitoring.
+- `main.rs`: crate root and executable entry point. It declares the public library modules and currently owns command dispatch, argument parsing, command orchestration, help text, and user-facing rendering for all CLI commands, including `interfaces`, `probe`, `monitor`, `status`, `setup`, `incidents`, `analyze`, `report`, and `replay`. This is the current organization; CLI extraction is proposed as [Task 0044](../tasks/0044-separate-cli-from-main.md).
+- `monitor`: validates monitor configuration, schedules sequential rounds, handles cancellation, coordinates collectors, tracks interface transitions and monitoring gaps, commits complete event cycles, then writes JSON Lines output. Its cycle and runner responsibilities currently share this module; a focused split is proposed as [Task 0045](../tasks/0045-split-monitor-responsibilities.md).
+- `interfaces`: reads Linux interface state and default-route information from local system interfaces.
+- `probes` and `dns`: perform explicit TCP connection attempts and opt-in system-configured DNS lookups.
+- `journal`: optionally reads and normalizes selected kernel link messages; it does not persist raw journal messages.
+- `event`: typed, versioned observation-event definitions and serialization.
+- `storage`: local SQLite schema, migrations, transactional cycle writes, bounded retention, and ordered event reads.
 - `monitor_state`: Linux advisory-lock lifecycle detection and a bounded, validated private monitor-configuration record.
+- `incidents`: deterministic probe-target incident lifecycle over ordered stored events; the CLI derives and filters incidents without persisting them.
+- `analysis`: pure evidence-citing rules over events and incidents, shared by stored-history and replay flows.
+- `report`: pure versioned text/JSON report construction with target redaction by default.
 - `report_output`: bounded local report-file creation with private permissions and no-overwrite behavior.
-- `event`: typed, versioned observation events (implemented).
-- `interfaces`: Linux interface state and default-route discovery (implemented).
-- `probes` and `dns`: explicit TCP checks and opt-in system-configured DNS lookups (implemented).
-- `monitor`: sequential round scheduling and cancellation (implemented); see the roadmap for planned reliability work.
-- `storage`: SQLite persistence and migration (implemented in M2).
-- `incidents`: deterministic probe-target lifecycle over stored events (Task 0006) and read-only history CLI (Task 0007); see the roadmap for unimplemented capability status.
-- `analysis`: pure evidence-citing rules over stored event types (Tasks 0008/0010/0014), exposed by read-only `analyze --latest`.
-- `report`: pure versioned text/JSON reports, redacted by default (Task 0011); see the roadmap for unimplemented capability status.
-- `replay`: strict bounded JSON fixture replay through incident and analysis APIs (Task 0009), exposed through `replay <FIXTURE.json>` (Task 0019).
+- `replay`: strict, bounded JSON fixture parsing and invocation of the incident and analysis APIs.
+
+These are Rust modules in one Cargo package, not separate crates. The module map describes current source responsibilities; proposed organization work is listed in the roadmap.
 
 ### Current read-only history commands
 
@@ -132,7 +137,7 @@ the configured pause by more than one second, it puts a `monitoring_gap` event
 before the current round's observations. The event is persisted and written
 with that cycle. Unavailable or backwards elapsed readings suppress detection.
 
-## 3. Event envelope v5 (reads v1 through v4)
+### 3. Event envelope v5 (reads v1 through v4)
 
 New events use schema v5; deserialization continues to accept schema-v1 through
 schema-v4 events. The envelope uses a serde-compatible Rust structure with
@@ -175,22 +180,7 @@ and is independent of wall-clock adjustments. If clock readings are missing,
 inconsistent, or move backwards, no gap is inferred; an emitted gap never
 establishes suspend or a network failure as its cause.
 
-- Every event identifies provenance/source and observation time.
-- IDs allow reports to cite specific evidence. Stable unique IDs may be generated by the ingestion layer, not each collector.
-- Source-specific structured fields are preferred to parsing prose in the rules engine.
-- **Unknown is distinct from zero, false, and failure.** Optionals and explicit enums should preserve uncertainty.
-- Schema version is required; unknown future versions must be rejected clearly or handled by explicit migration.
-- Wall clock is for presentation/correlation with logs; monotonic time should govern elapsed intervals and debounce in live sessions. Replay must define event order deterministically even if timestamps tie or jump.
-
-## 4. Probes and classification constraints
-
-- Distinct targets and probe methods can fail independently; no single probe determines “Internet up/down.”
-- Gateways may not reply to ICMP or accept TCP ports; probeability needs explicit state, and gateway reachability should never be inferred solely from a failed arbitrary TCP port.
-- Probe result should separate network errors, timeouts, active rejections, lookup problems, and unsupported/blocked methods.
-- Record configuration changes and network route/interface changes that affect interpretation.
-- Conservative analysis uses correlated evidence and provides alternatives. Do not calculate a numerical confidence score without calibration and evidence.
-
-## 5. Incidents and temporal rules
+### 5. Incidents and temporal rules
 
 Task 0006 implements `incidents::analyze_events`, a pure Rust API over stored events. It groups by exact `(probe role, numeric IP:port)` and opens an incident after two consecutive timeouts, network-unreachable, or host-unreachable outcomes within 30 seconds. Two consecutive successful TCP connects recover it. Refused, ambiguous, unsupported, or blocked outcomes break streaks and do not qualify. Counts, failure window, and maximum observation gap are configurable with validation; defaults are two failures, two successes, 30 seconds, and 60 seconds. A stored `monitoring_gap` event clears pending failure/recovery streaks and marks every open incident as containing an observation gap, regardless of whether its duration is known.
 
@@ -229,7 +219,7 @@ The `replay <FIXTURE.json>` CLI reads one supplied local file with a bounded
 and findings. It does not access the event database, network, or privileged
 interfaces, and it does not write output files.
 
-## 6. Current event storage
+### 6. Current event storage
 
 Task 0005 implements a local SQLite event store. Its database is
 `$XDG_DATA_HOME/netforensics/events.sqlite3`, or
@@ -263,15 +253,53 @@ trade-off and dependency choice, and [ADR 0002](decisions/0002-probe-incident-li
 for incident semantics. The history CLI reads stored events without writing to
 the database. Derived incident records are not persisted.
 
-## 7. Permissions and deployment
+## Design constraints and future direction
+
+The following guidance defines project boundaries and areas that may need
+additional design as capabilities evolve. It is not a claim that every listed
+mechanism or capability is implemented. Planned work, when present, is tracked
+in the [roadmap](ROADMAP.md).
+
+### Module organization
+
+Keep one Cargo package and Rust modules. Extract crates only if justified by
+dependency separation or actual reuse; do not scaffold unused modules.
+
+### Event and evidence principles
+
+- Every event identifies provenance/source and observation time.
+- IDs allow reports to cite specific evidence. Stable unique IDs may be generated by the ingestion layer, not each collector.
+- Prefer source-specific structured fields over parsing prose in the rules engine.
+- **Unknown is distinct from zero, false, and failure.** Optionals and explicit enums should preserve uncertainty.
+- Require an event schema version; reject unsupported future versions clearly or handle them through explicit migration.
+- Use wall-clock time for presentation and log correlation; use monotonic time for elapsed intervals and debounce in live sessions. Replay must define event order deterministically when timestamps tie or jump.
+
+### Probe and classification constraints
+
+- Distinct targets and probe methods can fail independently; no single probe determines “Internet up/down.”
+- Gateways may not reply to ICMP or accept TCP ports; probeability needs explicit state, and gateway reachability should never be inferred solely from a failed arbitrary TCP port.
+- Keep network errors, timeouts, active rejections, lookup problems, and unsupported/blocked methods distinguishable in probe results.
+- Record configuration changes and network route/interface changes when they are collected and relevant to interpretation.
+- Conservative analysis uses correlated evidence and provides alternatives. Do not calculate a numerical confidence score without calibration and evidence.
+
+### 7. Permissions and deployment
 
 Foreground process by default. Favor netlink/sysfs and other unprivileged Linux APIs where possible; do not require blanket root. Permissions for ICMP sockets, journal access, privileged counters, or eBPF vary by distribution; optional collectors can degrade gracefully. Avoid eBPF in the MVP unless justified by an unaddressed requirement.
 
-## 8. Cancellation, reliability, and observability
+### 8. Cancellation, reliability, and observability
 
-Cancel scheduling and collection cleanly on Ctrl+C; complete or explicitly abandon pending writes. Timeouts per probe; bounded queue and backpressure policy; record dropped observations and suspend/resume sampling gaps. Log diagnostic metadata to stderr with explicit verbosity and no secrets. Do not mistake system clock jumps for elapsed outages.
+The current foreground monitor responds to Ctrl+C by stopping new probe work
+and allowing the current bounded connection attempt to finish. It writes each
+cycle synchronously before printing that cycle's events, so there is no pending
+asynchronous write queue. It records detected inter-round gaps as described in
+the implemented monitor and event sections above.
 
-## 9. Architectural decision records
+Future changes to asynchronous collection or persistence would need an explicit
+bounded-queue, backpressure, and dropped-observation policy. Diagnostic output
+must not expose secrets, and elapsed-time conclusions must not rely on wall-clock
+changes alone.
+
+### 9. Architectural decision records
 
 Use a lightweight `docs/decisions/NNNN-title.md` only when a meaningful trade-off arises; record context, decision, consequences, and alternatives. No decision record is necessary for every file or library.
 
